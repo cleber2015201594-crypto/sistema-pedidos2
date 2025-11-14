@@ -15,9 +15,6 @@ from PIL import Image
 import io
 import time
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.ensemble import GradientBoostingClassifier
-from transformers import pipeline
 
 # =========================================
 # 🎨 CONFIGURAÇÃO DE TEMA E ESTILO
@@ -363,15 +360,15 @@ def init_db():
                 
                 # Criar produtos demo
                 produtos_demo = [
-                    ('Camiseta Básica Algodão', 'Camisetas', 'Básica', 'P', 'Branco', 15.00, 45.00, 50, 5),
-                    ('Calça Jeans Infantil', 'Calças', 'Jeans', '10', 'Azul', 35.00, 89.90, 30, 3),
-                    ('Moletom com Capuz', 'Agasalhos', 'Moletom', 'M', 'Cinza', 45.00, 120.00, 20, 2)
+                    ('Camiseta Básica Algodão', 'Camisetas', 'Básica', 'P', 'Branco', 15.00, 45.00, 30.00, 50, 5),
+                    ('Calça Jeans Infantil', 'Calças', 'Jeans', '10', 'Azul', 35.00, 89.90, 54.90, 30, 3),
+                    ('Moletom com Capuz', 'Agasalhos', 'Moletom', 'M', 'Cinza', 45.00, 120.00, 75.00, 20, 2)
                 ]
                 
                 for produto in produtos_demo:
                     cur.execute('''
-                        INSERT INTO produtos (fabrica_id, nome, categoria, subcategoria, tamanho, cor, preco_custo, preco_venda, estoque, estoque_minimo)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO produtos (fabrica_id, nome, categoria, subcategoria, tamanho, cor, preco_custo, preco_venda, margem_lucro, estoque, estoque_minimo)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ''', (fabrica_demo_id, *produto))
             
             conn.commit()
@@ -401,110 +398,85 @@ def get_connection():
         return None
 
 # =========================================
-# 🤖 SISTEMA DE IA INTEGRADO
+# 🤖 SISTEMA DE IA SIMPLIFICADO (Compatível)
 # =========================================
 
 class FactoryPilotAI:
     def __init__(self):
-        self.sentiment_analyzer = None
-        self.sales_model = None
-        
+        self.models_loaded = False
+    
     def initialize_models(self):
-        """Inicializa modelos de IA (lazy loading)"""
-        try:
-            if self.sentiment_analyzer is None:
-                self.sentiment_analyzer = pipeline('sentiment-analysis')
-            return True
-        except Exception as e:
-            st.warning(f"Modelos de IA não disponíveis: {e}")
-            return False
+        """Simulação - IA desativada para compatibilidade"""
+        return False
     
     def analisar_sentimento_texto(self, texto):
-        """Analisa sentimento de textos"""
-        if not self.initialize_models():
-            return {'sentimento': 'neutro', 'confianca': 0.5}
+        """Simulação básica de análise de sentimento"""
+        palavras_positivas = ['bom', 'ótimo', 'excelente', 'gostei', 'perfeito']
+        palavras_negativas = ['ruim', 'péssimo', 'horrível', 'odeio', 'problema']
         
-        try:
-            resultado = self.sentiment_analyzer(texto)[0]
-            return {
-                'sentimento': resultado['label'],
-                'confianca': resultado['score']
-            }
-        except:
-            return {'sentimento': 'neutro', 'confianca': 0.5}
+        texto_lower = texto.lower()
+        positivas = sum(1 for palavra in palavras_positivas if palavra in texto_lower)
+        negativas = sum(1 for palavra in palavras_negativas if palavra in texto_lower)
+        
+        if positivas > negativas:
+            return {'sentimento': 'POSITIVO', 'confianca': 0.7}
+        elif negativas > positivas:
+            return {'sentimento': 'NEGATIVO', 'confianca': 0.7}
+        else:
+            return {'sentimento': 'NEUTRO', 'confianca': 0.5}
     
     def prever_vendas_proximos_30_dias(self, fabrica_id):
-        """Previsão de vendas usando ML"""
-        try:
-            dados = self.obter_historico_vendas(fabrica_id)
-            if len(dados) < 30:
-                return self.previsao_conservadora()
-            
-            # Simulação de modelo de ML
-            dias = list(range(30))
-            tendencia = 1.02  # Crescimento de 2% ao dia
-            previsao = [dados[-1] * (tendencia ** i) for i in range(1, 31)]
-            
-            return {
-                'previsao': previsao,
-                'confianca': 0.85,
-                'tendencia': 'crescimento'
-            }
-        except:
-            return self.previsao_conservadora()
-    
-    def previsao_conservadora(self):
-        """Previsão conservadora quando não há dados suficientes"""
+        """Previsão simulada sem machine learning"""
         return {
             'previsao': [1000] * 30,
             'confianca': 0.6,
-            'tendencia': 'estavel'
+            'tendencia': 'estavel',
+            'observacao': '📊 Modo demo - Use dados reais para previsões precisas'
         }
     
-    def obter_historico_vendas(self, fabrica_id):
-        """Obtém histórico de vendas para treinamento"""
-        conn = get_connection()
-        if not conn:
-            return [1000, 1200, 1100, 1300, 1400]  # Dados demo
-        
-        try:
-            cur = conn.cursor()
-            cur.execute('''
-                SELECT COALESCE(SUM(valor_total), 0) as total
-                FROM pedidos 
-                WHERE fabrica_id = %s 
-                AND data_pedido >= CURRENT_DATE - INTERVAL '30 days'
-                GROUP BY DATE(data_pedido)
-                ORDER BY DATE(data_pedido)
-            ''', (fabrica_id,))
-            
-            resultados = cur.fetchall()
-            return [float(r[0]) for r in resultados] if resultados else [1000, 1200, 1100, 1300, 1400]
-        except:
-            return [1000, 1200, 1100, 1300, 1400]
-        finally:
-            conn.close()
-    
     def gerar_insights_inteligentes(self, fabrica_id):
-        """Gera insights automáticos baseado nos dados"""
+        """Insights simulados baseados em dados básicos"""
         insights = []
         
-        # Insight 1: Produtos com melhor margem
-        produtos = listar_produtos_por_fabrica(fabrica_id)
-        if produtos:
-            melhor_margem = max(produtos, key=lambda x: x[8] if x[8] else 0)
-            insights.append(f"💎 **{melhor_margem[2]}** tem a melhor margem: R$ {melhor_margem[8]:.2f}")
+        try:
+            # Insight 1: Produtos com melhor margem
+            produtos = listar_produtos_por_fabrica(fabrica_id)
+            if produtos:
+                produtos_com_margem = [p for p in produtos if p[8] is not None]
+                if produtos_com_margem:
+                    melhor_margem = max(produtos_com_margem, key=lambda x: x[8])
+                    insights.append(f"💎 **{melhor_margem[2]}** tem a melhor margem: R$ {melhor_margem[8]:.2f}")
+            
+            # Insight 2: Clientes mais valiosos
+            clientes = listar_clientes_completos_por_fabrica(fabrica_id)
+            if clientes:
+                clientes_com_gasto = [c for c in clientes if c[11] is not None and c[11] > 0]
+                if clientes_com_gasto:
+                    cliente_top = max(clientes_com_gasto, key=lambda x: x[11])
+                    insights.append(f"🏆 **{cliente_top[1]}** é seu cliente mais valioso: R$ {cliente_top[11]:.2f}")
+            
+            # Insight 3: Alertas de estoque
+            produtos_baixo_estoque = [p for p in produtos if p[9] <= p[10] and p[13]]
+            if produtos_baixo_estoque:
+                insights.append(f"⚠️ **{len(produtos_baixo_estoque)} produtos** com estoque baixo")
+            
+            # Insight 4: Pedidos pendentes
+            pedidos = listar_pedidos_por_fabrica(fabrica_id)
+            if pedidos:
+                pedidos_pendentes = [p for p in pedidos if p[3] in ['Orçamento', 'Produção']]
+                if pedidos_pendentes:
+                    insights.append(f"📦 **{len(pedidos_pendentes)} pedidos** em andamento")
+            
+        except Exception as e:
+            insights.append("🔧 Sistema em modo de demonstração")
         
-        # Insight 2: Clientes mais valiosos
-        clientes = listar_clientes_completos_por_fabrica(fabrica_id)
-        if clientes:
-            cliente_top = max([c for c in clientes if c[11]], key=lambda x: x[11] or 0)
-            insights.append(f"🏆 **{cliente_top[1]}** é seu cliente mais valioso: R$ {cliente_top[11]:.2f}")
-        
-        # Insight 3: Alertas de estoque
-        produtos_baixo_estoque = [p for p in produtos if p[10] <= p[11]]
-        if produtos_baixo_estoque:
-            insights.append(f"⚠️ **{len(produtos_baixo_estoque)} produtos** com estoque baixo")
+        # Se não gerou insights, adiciona alguns demo
+        if not insights:
+            insights = [
+                "💡 **Dica:** Cadastre mais produtos para insights precisos",
+                "📊 **Sugestão:** Use o sistema por 1 semana para dados reais",
+                "🎯 **Recomendação:** Foque nos clientes que mais compram"
+            ]
         
         return insights
 
@@ -618,7 +590,7 @@ def mostrar_dashboard_premium():
             <h2>{metricas.get('clientes_ativos', 0)}</h2>
             <p>Últimos 90 dias</p>
         </div>
-        """, unsafe_allow_html=True)
+        ""', unsafe_allow_html=True)
     
     with col4:
         st.markdown(f"""
@@ -630,14 +602,14 @@ def mostrar_dashboard_premium():
         """, unsafe_allow_html=True)
     
     # Seção IA - Assistente Inteligente
-    st.markdown("## 🤖 Assistente IA FactoryPilot")
+    st.markdown("## 🤖 Assistente FactoryPilot")
     
     col1, col2 = st.columns([2, 1])
     
     with col1:
         st.markdown("""
         <div class="ai-chat-bubble">
-        🧠 **Assistente IA:** Olá! Sou seu assistente inteligente. 
+        🧠 **Assistente:** Olá! Sou seu assistente inteligente. 
         Posso ajudar a analisar seus dados e dar insights valiosos 
         para o seu negócio. O que gostaria de saber?
         </div>
@@ -650,41 +622,50 @@ def mostrar_dashboard_premium():
             if "aumentar" in pergunta.lower() and "venda" in pergunta.lower():
                 produtos = listar_produtos_por_fabrica(fabrica_id)
                 if produtos:
-                    melhor_margem = max(produtos, key=lambda x: x[8] if x[8] else 0)
-                    st.markdown(f"""
-                    <div class="ai-chat-bubble">
-                    💡 **Recomendação IA:** Para aumentar vendas, foque em **{melhor_margem[2]}** 
-                    que tem a melhor margem (R$ {melhor_margem[8]:.2f}). Considere promoções 
-                    ou pacotes com este produto.
-                    </div>
-                    """, unsafe_allow_html=True)
+                    produtos_com_margem = [p for p in produtos if p[8] is not None]
+                    if produtos_com_margem:
+                        melhor_margem = max(produtos_com_margem, key=lambda x: x[8])
+                        st.markdown(f"""
+                        <div class="ai-chat-bubble">
+                        💡 **Recomendação:** Para aumentar vendas, foque em **{melhor_margem[2]}** 
+                        que tem a melhor margem (R$ {melhor_margem[8]:.2f}). Considere promoções 
+                        ou pacotes com este produto.
+                        </div>
+                        """, unsafe_allow_html=True)
             
             elif "melhor" in pergunta.lower() and "cliente" in pergunta.lower():
                 clientes = listar_clientes_completos_por_fabrica(fabrica_id)
                 if clientes:
-                    cliente_top = max([c for c in clientes if c[11]], key=lambda x: x[11] or 0, default=None)
-                    if cliente_top:
+                    clientes_com_gasto = [c for c in clientes if c[11] is not None and c[11] > 0]
+                    if clientes_com_gasto:
+                        cliente_top = max(clientes_com_gasto, key=lambda x: x[11])
                         st.markdown(f"""
                         <div class="ai-chat-bubble">
-                        🏆 **Insight IA:** Seu cliente mais valioso é **{cliente_top[1]}** 
+                        🏆 **Insight:** Seu cliente mais valioso é **{cliente_top[1]}** 
                         com R$ {cliente_top[11]:.2f} em compras. Recomendo um programa 
                         de fidelidade para este cliente.
                         </div>
                         """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="ai-chat-bubble">
+                🤖 **Assistente:** Estou aqui para ajudar! Com mais dados de uso, 
+                poderei dar insights mais precisos sobre seu negócio.
+                </div>
+                """, unsafe_allow_html=True)
     
     with col2:
-        # Insights automáticos da IA
+        # Insights automáticos
         st.markdown("### 💡 Insights Automáticos")
         insights = factory_ai.gerar_insights_inteligentes(fabrica_id)
         
-        for insight in insights[:3]:  # Mostrar apenas 3 insights
+        for insight in insights[:3]:
             st.info(insight)
         
         # Previsão de vendas
-        st.markdown("### 📈 Previsão IA")
+        st.markdown("### 📈 Previsão")
         previsao = factory_ai.prever_vendas_proximos_30_dias(fabrica_id)
-        st.metric("Próximos 30 dias", f"R$ {sum(previsao['previsao'])/30:.0f}/dia", 
-                 delta=f"{'↑' if previsao['tendencia'] == 'crescimento' else '↓'} Previsão")
+        st.metric("Próximos 30 dias", f"R$ {sum(previsao['previsao'])/30:.0f}/dia")
     
     # Gráficos
     st.markdown("## 📈 Analytics em Tempo Real")
@@ -714,16 +695,16 @@ def mostrar_dashboard_premium():
         st.subheader("🎯 Distribuição de Pedidos")
         pedidos = listar_pedidos_por_fabrica(fabrica_id)
         if pedidos:
-            df_pedidos = pd.DataFrame(pedidos, columns=['ID', 'Fabrica_ID', 'Cliente_ID', 'Status', 'Prioridade', 
-                                                       'Data_Pedido', 'Data_Entrega_Prev', 'Data_Entrega_Real',
-                                                       'Quantidade', 'Valor_Total', 'Custo_Total', 'Lucro_Total',
-                                                       'Observacoes', 'Responsavel', 'Forma_Pagamento', 'Pago', 'Cliente_Nome'])
-            status_counts = df_pedidos['Status'].value_counts()
+            status_counts = {}
+            for pedido in pedidos:
+                status = pedido[3]
+                status_counts[status] = status_counts.get(status, 0) + 1
             
-            fig = px.pie(values=status_counts.values, names=status_counts.index,
-                        title="Pedidos por Status", hole=0.4)
-            fig.update_layout(height=300)
-            st.plotly_chart(fig, use_container_width=True)
+            if status_counts:
+                fig = px.pie(values=list(status_counts.values()), names=list(status_counts.keys()),
+                            title="Pedidos por Status", hole=0.4)
+                fig.update_layout(height=300)
+                st.plotly_chart(fig, use_container_width=True)
         else:
             # Gráfico demo
             status_demo = {'Orçamento': 5, 'Produção': 8, 'Entregue': 12, 'Cancelado': 1}
@@ -1317,7 +1298,7 @@ def pagina_produtos_premium():
         if produtos:
             dados = []
             for produto in produtos:
-                status_estoque = "✅" if produto[10] > produto[11] else "⚠️" if produto[10] > 0 else "❌"
+                status_estoque = "✅" if produto[9] > produto[10] else "⚠️" if produto[9] > 0 else "❌"
                 
                 dados.append({
                     'ID': produto[0],
@@ -1326,7 +1307,7 @@ def pagina_produtos_premium():
                     'Tamanho': produto[5],
                     'Cor': produto[6],
                     'Preço Venda': f"R$ {produto[8]:.2f}",
-                    'Estoque': f"{status_estoque} {produto[10]}",
+                    'Estoque': f"{status_estoque} {produto[9]}",
                     'Status': 'Ativo' if produto[14] else 'Inativo'
                 })
             
