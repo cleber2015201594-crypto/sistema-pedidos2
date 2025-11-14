@@ -79,6 +79,7 @@ def init_db():
                     preco DECIMAL(10,2),
                     estoque INTEGER DEFAULT 0,
                     descricao TEXT,
+                    escola_id INTEGER REFERENCES escolas(id),
                     data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -399,7 +400,7 @@ def excluir_cliente(cliente_id):
         conn.close()
 
 # FUNÇÕES PARA PRODUTOS
-def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao):
+def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id):
     conn = get_connection()
     if not conn:
         return False, "Erro de conexão"
@@ -407,9 +408,9 @@ def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao):
     try:
         cur = conn.cursor()
         cur.execute('''
-            INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, descricao)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ''', (nome, categoria, tamanho, cor, preco, estoque, descricao))
+            INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id))
         
         conn.commit()
         return True, "Produto cadastrado com sucesso!"
@@ -426,7 +427,12 @@ def listar_produtos():
     
     try:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM produtos ORDER BY nome")
+        cur.execute('''
+            SELECT p.*, e.nome as escola_nome 
+            FROM produtos p 
+            LEFT JOIN escolas e ON p.escola_id = e.id 
+            ORDER BY p.nome
+        ''')
         return cur.fetchall()
     except Exception as e:
         st.error(f"Erro ao listar produtos: {e}")
@@ -551,6 +557,36 @@ def excluir_pedido(pedido_id):
     finally:
         conn.close()
 
+def obter_produtos_por_escola(escola_id=None):
+    """Obtém produtos, filtrando por escola se especificado"""
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor()
+        if escola_id:
+            cur.execute('''
+                SELECT p.*, e.nome as escola_nome 
+                FROM produtos p 
+                LEFT JOIN escolas e ON p.escola_id = e.id 
+                WHERE p.escola_id = %s OR p.escola_id IS NULL
+                ORDER BY p.nome
+            ''', (escola_id,))
+        else:
+            cur.execute('''
+                SELECT p.*, e.nome as escola_nome 
+                FROM produtos p 
+                LEFT JOIN escolas e ON p.escola_id = e.id 
+                ORDER BY p.nome
+            ''')
+        return cur.fetchall()
+    except Exception as e:
+        st.error(f"Erro ao listar produtos: {e}")
+        return []
+    finally:
+        conn.close()
+
 # =========================================
 # 🎨 INTERFACE PRINCIPAL
 # =========================================
@@ -663,7 +699,7 @@ if menu == "📊 Dashboard":
         produtos_baixo_estoque = len([p for p in produtos if p[6] < 5])
         st.metric("Alertas de Estoque", produtos_baixo_estoque, delta=-produtos_baixo_estoque)
     
-    # Ações Rápidas
+    # Ações Rápidas - CORRIGIDAS
     st.header("⚡ Ações Rápidas")
     col1, col2, col3 = st.columns(3)
     
@@ -681,6 +717,34 @@ if menu == "📊 Dashboard":
         if st.button("👕 Cadastrar Produto", use_container_width=True):
             st.session_state.menu = "👕 Produtos"
             st.rerun()
+    
+    # Gráficos do Dashboard
+    st.header("📈 Visualizações")
+    
+    if pedidos:
+        # Gráfico de pedidos por status
+        df_pedidos = pd.DataFrame(pedidos, columns=['ID', 'Cliente_ID', 'Status', 'Data_Pedido', 'Data_Entrega', 'Quantidade', 'Valor', 'Observacoes', 'Cliente_Nome'])
+        status_counts = df_pedidos['Status'].value_counts()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            fig_status = px.pie(
+                values=status_counts.values,
+                names=status_counts.index,
+                title="Pedidos por Status"
+            )
+            st.plotly_chart(fig_status, use_container_width=True)
+        
+        with col2:
+            # Gráfico de valor total por pedido
+            fig_valor = px.bar(
+                df_pedidos.head(10),
+                x='Cliente_Nome',
+                y='Valor',
+                title="Top 10 Pedidos por Valor"
+            )
+            st.plotly_chart(fig_valor, use_container_width=True)
 
 elif menu == "👥 Clientes":
     tab1, tab2, tab3 = st.tabs(["➕ Cadastrar Cliente", "📋 Listar Clientes", "🗑️ Excluir Cliente"])
@@ -769,9 +833,20 @@ elif menu == "👕 Produtos":
         estoque = st.number_input("Estoque inicial", min_value=0, value=10)
         descricao = st.text_area("Descrição")
         
+        # CAMPO ESCOLA ADICIONADO
+        escolas_db = listar_escolas()
+        escola_selecionada = st.selectbox(
+            "🏫 Escola associada (opcional)",
+            ["Nenhuma"] + [e[1] for e in escolas_db]
+        )
+        
         if st.button("✅ Cadastrar Produto", type="primary"):
             if nome:
-                sucesso, msg = adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao)
+                escola_id = None
+                if escola_selecionada != "Nenhuma":
+                    escola_id = next(e[0] for e in escolas_db if e[1] == escola_selecionada)
+                
+                sucesso, msg = adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id)
                 if sucesso:
                     st.success(msg)
                     st.balloons()
@@ -795,7 +870,8 @@ elif menu == "👕 Produtos":
                     'Cor': produto[4],
                     'Preço': f"R$ {produto[5]:.2f}",
                     'Estoque': produto[6],
-                    'Descrição': produto[7] or 'N/A'
+                    'Descrição': produto[7] or 'N/A',
+                    'Escola': produto[9] or 'Todas'
                 })
             
             st.dataframe(pd.DataFrame(dados), use_container_width=True)
@@ -835,12 +911,253 @@ elif menu == "📦 Estoque":
         st.info("👕 Nenhum produto cadastrado")
 
 elif menu == "📦 Pedidos":
-    st.info("🚀 Módulo de Pedidos em desenvolvimento...")
-    # Aqui você pode implementar a lógica completa de pedidos
+    tab1, tab2, tab3 = st.tabs(["➕ Novo Pedido", "📋 Listar Pedidos", "🗑️ Excluir Pedido"])
     
+    with tab1:
+        st.header("➕ Novo Pedido")
+        
+        # Selecionar cliente
+        clientes = listar_clientes()
+        if not clientes:
+            st.warning("❌ Nenhum cliente cadastrado. Cadastre um cliente primeiro.")
+        else:
+            cliente_selecionado = st.selectbox(
+                "👤 Selecione o cliente:",
+                [f"{c[1]} (Escolas: {c[4]})" for c in clientes]
+            )
+            
+            if cliente_selecionado:
+                cliente_id = next(c[0] for c in clientes if f"{c[1]} (Escolas: {c[4]})" == cliente_selecionado)
+                cliente = next(c for c in clientes if c[0] == cliente_id)
+                
+                # Obter escolas do cliente
+                escolas_cliente = cliente[4].split(', ') if cliente[4] else []
+                
+                # Selecionar produtos baseado nas escolas do cliente
+                produtos_disponiveis = []
+                for escola in escolas_cliente:
+                    escola_id = next(e[0] for e in listar_escolas() if e[1] == escola)
+                    produtos_escola = obter_produtos_por_escola(escola_id)
+                    produtos_disponiveis.extend(produtos_escola)
+                
+                # Adicionar produtos sem escola específica
+                produtos_gerais = obter_produtos_por_escola(None)
+                produtos_disponiveis.extend(produtos_gerais)
+                
+                if not produtos_disponiveis:
+                    st.warning("❌ Nenhum produto disponível para as escolas deste cliente.")
+                else:
+                    # Itens do pedido
+                    st.subheader("🛒 Itens do Pedido")
+                    itens = []
+                    
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        st.write("**Produto**")
+                    with col2:
+                        st.write("**Quantidade**")
+                    with col3:
+                        st.write("**Subtotal**")
+                    
+                    for i in range(3):  # Permitir até 3 itens inicialmente
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        with col1:
+                            produto_selecionado = st.selectbox(
+                                f"Produto {i+1}",
+                                [f"{p[1]} - R$ {p[5]:.2f} (Estoque: {p[6]})" for p in produtos_disponiveis],
+                                key=f"produto_{i}"
+                            )
+                        with col2:
+                            quantidade = st.number_input("Qtd", min_value=0, value=1, key=f"qtd_{i}")
+                        with col3:
+                            if produto_selecionado != "Selecione...":
+                                preco = next(p[5] for p in produtos_disponiveis if f"{p[1]} - R$ {p[5]:.2f} (Estoque: {p[6]})" == produto_selecionado)
+                                subtotal = preco * quantidade
+                                st.write(f"R$ {subtotal:.2f}")
+                                
+                                if quantidade > 0:
+                                    produto_id = next(p[0] for p in produtos_disponiveis if f"{p[1]} - R$ {p[5]:.2f} (Estoque: {p[6]})" == produto_selecionado)
+                                    itens.append({
+                                        'produto_id': produto_id,
+                                        'quantidade': quantidade,
+                                        'preco_unitario': preco,
+                                        'subtotal': subtotal
+                                    })
+                    
+                    # Data de entrega e observações
+                    data_entrega = st.date_input("📅 Data de Entrega Prevista", min_value=date.today())
+                    observacoes = st.text_area("📝 Observações")
+                    
+                    # Resumo do pedido
+                    if itens:
+                        total_pedido = sum(item['subtotal'] for item in itens)
+                        st.subheader(f"💰 Total do Pedido: R$ {total_pedido:.2f}")
+                        
+                        if st.button("✅ Finalizar Pedido", type="primary"):
+                            sucesso, resultado = adicionar_pedido(cliente_id, itens, data_entrega, observacoes)
+                            if sucesso:
+                                st.success(f"🎉 Pedido #{resultado} criado com sucesso!")
+                                st.balloons()
+                            else:
+                                st.error(f"❌ Erro ao criar pedido: {resultado}")
+    
+    with tab2:
+        st.header("📋 Pedidos Cadastrados")
+        pedidos = listar_pedidos()
+        
+        if pedidos:
+            dados = []
+            for pedido in pedidos:
+                dados.append({
+                    'ID': pedido[0],
+                    'Cliente': pedido[8],
+                    'Status': pedido[2],
+                    'Data Pedido': pedido[3],
+                    'Entrega Prevista': pedido[4],
+                    'Quantidade': pedido[5],
+                    'Valor Total': f"R$ {pedido[6]:.2f}",
+                    'Observações': pedido[7] or 'Nenhuma'
+                })
+            
+            st.dataframe(pd.DataFrame(dados), use_container_width=True)
+        else:
+            st.info("📦 Nenhum pedido cadastrado")
+    
+    with tab3:
+        st.header("🗑️ Excluir Pedido")
+        pedidos = listar_pedidos()
+        
+        if pedidos:
+            pedido_selecionado = st.selectbox(
+                "Selecione o pedido para excluir:",
+                [f"Pedido #{p[0]} - {p[8]} - R$ {p[6]:.2f}" for p in pedidos]
+            )
+            
+            if pedido_selecionado:
+                pedido_id = int(pedido_selecionado.split("#")[1].split(" -")[0])
+                
+                st.warning("⚠️ Esta ação não pode ser desfeita!")
+                if st.button("🗑️ Confirmar Exclusão", type="primary"):
+                    sucesso, msg = excluir_pedido(pedido_id)
+                    if sucesso:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        else:
+            st.info("📦 Nenhum pedido cadastrado")
+
 elif menu == "📈 Relatórios":
-    st.info("📊 Módulo de Relatórios em desenvolvimento...")
-    # Aqui você pode implementar os relatórios
+    tab1, tab2, tab3 = st.tabs(["📊 Vendas", "👥 Clientes", "👕 Produtos"])
+    
+    with tab1:
+        st.header("📊 Relatório de Vendas")
+        pedidos = listar_pedidos()
+        
+        if pedidos:
+            df_vendas = pd.DataFrame(pedidos, columns=['ID', 'Cliente_ID', 'Status', 'Data_Pedido', 'Data_Entrega', 'Quantidade', 'Valor', 'Observacoes', 'Cliente_Nome'])
+            
+            # Métricas de vendas
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                total_vendas = df_vendas['Valor'].sum()
+                st.metric("💰 Total em Vendas", f"R$ {total_vendas:.2f}")
+            with col2:
+                media_vendas = df_vendas['Valor'].mean()
+                st.metric("📊 Ticket Médio", f"R$ {media_vendas:.2f}")
+            with col3:
+                total_pedidos = len(df_vendas)
+                st.metric("📦 Total de Pedidos", total_pedidos)
+            
+            # Gráfico de vendas por status
+            fig_status = px.pie(
+                df_vendas,
+                names='Status',
+                values='Valor',
+                title="Distribuição de Vendas por Status"
+            )
+            st.plotly_chart(fig_status, use_container_width=True)
+            
+            # Tabela detalhada
+            st.subheader("📋 Detalhamento de Pedidos")
+            st.dataframe(df_vendas[['ID', 'Cliente_Nome', 'Status', 'Data_Pedido', 'Valor']], use_container_width=True)
+        else:
+            st.info("📦 Nenhum pedido para gerar relatórios")
+    
+    with tab2:
+        st.header("👥 Relatório de Clientes")
+        clientes = listar_clientes()
+        
+        if clientes:
+            df_clientes = pd.DataFrame(clientes, columns=['ID', 'Nome', 'Telefone', 'Email', 'Escolas', 'Data_Cadastro'])
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("👥 Total de Clientes", len(clientes))
+            with col2:
+                clientes_novos = len([c for c in clientes if c[5] == date.today().strftime("%Y-%m-%d")])
+                st.metric("🆕 Novos Hoje", clientes_novos)
+            
+            # Distribuição por escolas
+            escolas_count = {}
+            for cliente in clientes:
+                if cliente[4]:
+                    for escola in cliente[4].split(', '):
+                        escolas_count[escola] = escolas_count.get(escola, 0) + 1
+            
+            if escolas_count:
+                fig_escolas = px.bar(
+                    x=list(escolas_count.keys()),
+                    y=list(escolas_count.values()),
+                    title="Clientes por Escola",
+                    labels={'x': 'Escola', 'y': 'Quantidade de Clientes'}
+                )
+                st.plotly_chart(fig_escolas, use_container_width=True)
+            
+            st.dataframe(df_clientes, use_container_width=True)
+        else:
+            st.info("👥 Nenhum cliente cadastrado")
+    
+    with tab3:
+        st.header("👕 Relatório de Produtos")
+        produtos = listar_produtos()
+        
+        if produtos:
+            df_produtos = pd.DataFrame(produtos, columns=['ID', 'Nome', 'Categoria', 'Tamanho', 'Cor', 'Preco', 'Estoque', 'Descricao', 'Escola_ID', 'Escola_Nome'])
+            
+            # Métricas de produtos
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                total_produtos = len(produtos)
+                st.metric("👕 Total de Produtos", total_produtos)
+            with col2:
+                baixo_estoque = len([p for p in produtos if p[6] < 5])
+                st.metric("⚠️ Baixo Estoque", baixo_estoque)
+            with col3:
+                sem_estoque = len([p for p in produtos if p[6] == 0])
+                st.metric("❌ Sem Estoque", sem_estoque)
+            
+            # Produtos por categoria
+            categoria_count = df_produtos['Categoria'].value_counts()
+            fig_categoria = px.pie(
+                values=categoria_count.values,
+                names=categoria_count.index,
+                title="Produtos por Categoria"
+            )
+            st.plotly_chart(fig_categoria, use_container_width=True)
+            
+            # Tabela de produtos com baixo estoque
+            st.subheader("⚠️ Produtos com Baixo Estoque")
+            baixo_estoque_df = df_produtos[df_produtos['Estoque'] < 5]
+            if not baixo_estoque_df.empty:
+                st.dataframe(baixo_estoque_df[['Nome', 'Categoria', 'Tamanho', 'Estoque']], use_container_width=True)
+            else:
+                st.success("✅ Todos os produtos têm estoque suficiente!")
+            
+            st.subheader("📋 Todos os Produtos")
+            st.dataframe(df_produtos[['Nome', 'Categoria', 'Tamanho', 'Cor', 'Preco', 'Estoque', 'Escola_Nome']], use_container_width=True)
+        else:
+            st.info("👕 Nenhum produto cadastrado")
 
 # Rodapé
 st.sidebar.markdown("---")
