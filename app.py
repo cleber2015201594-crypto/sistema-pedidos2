@@ -80,8 +80,10 @@ def init_db():
                     id SERIAL PRIMARY KEY,
                     cliente_id INTEGER REFERENCES clientes(id),
                     status VARCHAR(50) DEFAULT 'Pendente',
+                    forma_pagamento VARCHAR(50) DEFAULT 'Dinheiro',
                     data_pedido TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     data_entrega_prevista DATE,
+                    data_entrega_real DATE,
                     quantidade_total INTEGER,
                     valor_total DECIMAL(10,2),
                     observacoes TEXT
@@ -480,7 +482,7 @@ def listar_escolas():
         conn.close()
 
 # FUNÇÕES PARA PEDIDOS
-def adicionar_pedido(cliente_id, itens, data_entrega, observacoes):
+def adicionar_pedido(cliente_id, itens, data_entrega, forma_pagamento, observacoes):
     conn = get_connection()
     if not conn:
         return False, "Erro de conexão"
@@ -492,9 +494,9 @@ def adicionar_pedido(cliente_id, itens, data_entrega, observacoes):
         valor_total = sum(item['subtotal'] for item in itens)
         
         cur.execute('''
-            INSERT INTO pedidos (cliente_id, data_entrega_prevista, quantidade_total, valor_total, observacoes)
-            VALUES (%s, %s, %s, %s, %s) RETURNING id
-        ''', (cliente_id, data_entrega, quantidade_total, valor_total, observacoes))
+            INSERT INTO pedidos (cliente_id, data_entrega_prevista, forma_pagamento, quantidade_total, valor_total, observacoes)
+            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+        ''', (cliente_id, data_entrega, forma_pagamento, quantidade_total, valor_total, observacoes))
         
         pedido_id = cur.fetchone()[0]
         
@@ -534,6 +536,37 @@ def listar_pedidos():
     except Exception as e:
         st.error(f"Erro ao listar pedidos: {e}")
         return []
+    finally:
+        conn.close()
+
+def atualizar_status_pedido(pedido_id, novo_status):
+    conn = get_connection()
+    if not conn:
+        return False, "Erro de conexão"
+    
+    try:
+        cur = conn.cursor()
+        
+        if novo_status == 'Entregue':
+            data_entrega = datetime.now().strftime("%Y-%m-%d")
+            cur.execute('''
+                UPDATE pedidos 
+                SET status = %s, data_entrega_real = %s 
+                WHERE id = %s
+            ''', (novo_status, data_entrega, pedido_id))
+        else:
+            cur.execute('''
+                UPDATE pedidos 
+                SET status = %s 
+                WHERE id = %s
+            ''', (novo_status, pedido_id))
+        
+        conn.commit()
+        return True, "Status do pedido atualizado com sucesso!"
+        
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro: {str(e)}"
     finally:
         conn.close()
 
@@ -981,7 +1014,7 @@ elif menu == "📦 Estoque":
         st.info("👕 Nenhum produto cadastrado")
 
 elif menu == "📦 Pedidos":
-    tab1, tab2, tab3 = st.tabs(["➕ Novo Pedido", "📋 Listar Pedidos", "🗑️ Excluir Pedido"])
+    tab1, tab2, tab3, tab4 = st.tabs(["➕ Novo Pedido", "📋 Listar Pedidos", "🔄 Atualizar Status", "🗑️ Excluir Pedido"])
     
     with tab1:
         st.header("➕ Novo Pedido")
@@ -1068,9 +1101,16 @@ elif menu == "📦 Pedidos":
                         
                         st.write(f"**Total do Pedido: R$ {total_pedido:.2f}**")
                         
-                        # Data de entrega e observações
-                        data_entrega = st.date_input("📅 Data de Entrega Prevista", min_value=date.today())
-                        observacoes = st.text_area("Observações")
+                        # Data de entrega, forma de pagamento e observações
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            data_entrega = st.date_input("📅 Data de Entrega Prevista", min_value=date.today())
+                            forma_pagamento = st.selectbox(
+                                "💳 Forma de Pagamento",
+                                ["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Transferência"]
+                            )
+                        with col2:
+                            observacoes = st.text_area("Observações")
                         
                         if st.button("✅ Finalizar Pedido", type="primary"):
                             if st.session_state.itens_pedido:
@@ -1078,6 +1118,7 @@ elif menu == "📦 Pedidos":
                                     cliente_id, 
                                     st.session_state.itens_pedido, 
                                     data_entrega, 
+                                    forma_pagamento,
                                     observacoes
                                 )
                                 if sucesso:
@@ -1103,21 +1144,25 @@ elif menu == "📦 Pedidos":
         if pedidos:
             dados = []
             for pedido in pedidos:
-                status_color = {
-                    'Pendente': '🟡',
-                    'Entregue': '🟢',
-                    'Cancelado': '🔴'
-                }.get(pedido[2], '⚪')
+                status_info = {
+                    'Pendente': '🟡 Pendente',
+                    'Em produção': '🟠 Em produção', 
+                    'Pronto para entrega': '🔵 Pronto para entrega',
+                    'Entregue': '🟢 Entregue',
+                    'Cancelado': '🔴 Cancelado'
+                }.get(pedido[2], f'⚪ {pedido[2]}')
                 
                 dados.append({
                     'ID': pedido[0],
-                    'Cliente': pedido[8],
-                    'Status': f"{status_color} {pedido[2]}",
-                    'Data Pedido': pedido[3],
-                    'Entrega Prevista': pedido[4],
-                    'Quantidade': pedido[5],
-                    'Valor Total': f"R$ {pedido[6]:.2f}",
-                    'Observações': pedido[7] or 'Nenhuma'
+                    'Cliente': pedido[9],
+                    'Status': status_info,
+                    'Forma Pagamento': pedido[3],
+                    'Data Pedido': pedido[4],
+                    'Entrega Prevista': pedido[5],
+                    'Entrega Real': pedido[6] or 'Não entregue',
+                    'Quantidade': pedido[7],
+                    'Valor Total': f"R$ {pedido[8]:.2f}",
+                    'Observações': pedido[10] or 'Nenhuma'
                 })
             
             st.dataframe(pd.DataFrame(dados), use_container_width=True)
@@ -1125,13 +1170,46 @@ elif menu == "📦 Pedidos":
             st.info("📦 Nenhum pedido realizado")
     
     with tab3:
+        st.header("🔄 Atualizar Status do Pedido")
+        pedidos = listar_pedidos()
+        
+        if pedidos:
+            pedido_selecionado = st.selectbox(
+                "Selecione o pedido:",
+                [f"Pedido #{p[0]} - {p[9]} - Status: {p[2]}" for p in pedidos]
+            )
+            
+            if pedido_selecionado:
+                pedido_id = int(pedido_selecionado.split("#")[1].split(" -")[0])
+                pedido = next(p for p in pedidos if p[0] == pedido_id)
+                
+                st.write(f"**Cliente:** {pedido[9]}")
+                st.write(f"**Status atual:** {pedido[2]}")
+                st.write(f"**Valor Total:** R$ {pedido[8]:.2f}")
+                
+                novo_status = st.selectbox(
+                    "Novo status:",
+                    ["Pendente", "Em produção", "Pronto para entrega", "Entregue", "Cancelado"]
+                )
+                
+                if st.button("🔄 Atualizar Status", type="primary"):
+                    sucesso, msg = atualizar_status_pedido(pedido_id, novo_status)
+                    if sucesso:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        else:
+            st.info("📦 Nenhum pedido para atualizar")
+    
+    with tab4:
         st.header("🗑️ Excluir Pedido")
         pedidos = listar_pedidos()
         
         if pedidos:
             pedido_selecionado = st.selectbox(
                 "Selecione o pedido para excluir:",
-                [f"Pedido #{p[0]} - {p[8]} - R$ {p[6]:.2f}" for p in pedidos]
+                [f"Pedido #{p[0]} - {p[9]} - R$ {p[8]:.2f}" for p in pedidos]
             )
             
             if pedido_selecionado:
