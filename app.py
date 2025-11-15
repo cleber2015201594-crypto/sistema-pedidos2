@@ -19,6 +19,64 @@ def make_hashes(password):
 def check_hashes(password, hashed_text):
     return make_hashes(password) == hashed_text
 
+def atualizar_estrutura_banco():
+    """Atualiza a estrutura do banco se necessário"""
+    conn = get_connection()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        
+        # Verificar se a coluna escola_id existe na tabela produtos
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='produtos' and column_name='escola_id'
+        """)
+        resultado = cur.fetchone()
+        
+        if not resultado:
+            # Adicionar coluna escola_id se não existir
+            cur.execute('ALTER TABLE produtos ADD COLUMN escola_id INTEGER REFERENCES escolas(id)')
+            st.success("✅ Estrutura do banco atualizada: coluna escola_id adicionada")
+        
+        # Verificar se a coluna forma_pagamento existe na tabela pedidos
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='forma_pagamento'
+        """)
+        resultado = cur.fetchone()
+        
+        if not resultado:
+            # Adicionar coluna forma_pagamento se não existir
+            cur.execute('ALTER TABLE pedidos ADD COLUMN forma_pagamento VARCHAR(50) DEFAULT \'Dinheiro\'')
+            st.success("✅ Estrutura do banco atualizada: coluna forma_pagamento adicionada")
+        
+        # Verificar se a coluna data_entrega_real existe na tabela pedidos
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='data_entrega_real'
+        """)
+        resultado = cur.fetchone()
+        
+        if not resultado:
+            # Adicionar coluna data_entrega_real se não existir
+            cur.execute('ALTER TABLE pedidos ADD COLUMN data_entrega_real DATE')
+            st.success("✅ Estrutura do banco atualizada: coluna data_entrega_real adicionada")
+        
+        conn.commit()
+        return True
+        
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao atualizar estrutura do banco: {str(e)}")
+        return False
+    finally:
+        conn.close()
+
 def init_db():
     """Inicializa o banco de dados e cria tabelas necessárias"""
     conn = get_connection()
@@ -58,7 +116,7 @@ def init_db():
                 )
             ''')
             
-            # Tabela de produtos
+            # Tabela de produtos (SEM escola_id inicialmente - será adicionada depois)
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS produtos (
                     id SERIAL PRIMARY KEY,
@@ -69,7 +127,6 @@ def init_db():
                     preco DECIMAL(10,2),
                     estoque INTEGER DEFAULT 0,
                     descricao TEXT,
-                    escola_id INTEGER REFERENCES escolas(id),
                     data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -80,10 +137,8 @@ def init_db():
                     id SERIAL PRIMARY KEY,
                     cliente_id INTEGER REFERENCES clientes(id),
                     status VARCHAR(50) DEFAULT 'Pendente',
-                    forma_pagamento VARCHAR(50) DEFAULT 'Dinheiro',
                     data_pedido TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     data_entrega_prevista DATE,
-                    data_entrega_real DATE,
                     quantidade_total INTEGER,
                     valor_total DECIMAL(10,2),
                     observacoes TEXT
@@ -124,6 +179,9 @@ def init_db():
                 ''', (escola,))
             
             conn.commit()
+            
+            # Atualizar estrutura do banco após criação inicial
+            atualizar_estrutura_banco()
             
         except Exception as e:
             st.error(f"Erro ao inicializar banco: {str(e)}")
@@ -387,10 +445,25 @@ def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao, 
     
     try:
         cur = conn.cursor()
-        cur.execute('''
-            INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id))
+        
+        # Verificar se a coluna escola_id existe
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='produtos' and column_name='escola_id'
+        """)
+        tem_escola_id = cur.fetchone()
+        
+        if tem_escola_id:
+            cur.execute('''
+                INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id))
+        else:
+            cur.execute('''
+                INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, descricao)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', (nome, categoria, tamanho, cor, preco, estoque, descricao))
         
         conn.commit()
         return True, "Produto cadastrado com sucesso!"
@@ -407,12 +480,28 @@ def listar_produtos():
     
     try:
         cur = conn.cursor()
-        cur.execute('''
-            SELECT p.*, e.nome as escola_nome 
-            FROM produtos p 
-            LEFT JOIN escolas e ON p.escola_id = e.id 
-            ORDER BY p.nome
-        ''')
+        
+        # Verificar se a coluna escola_id existe
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='produtos' and column_name='escola_id'
+        """)
+        tem_escola_id = cur.fetchone()
+        
+        if tem_escola_id:
+            cur.execute('''
+                SELECT p.*, e.nome as escola_nome 
+                FROM produtos p 
+                LEFT JOIN escolas e ON p.escola_id = e.id 
+                ORDER BY p.nome
+            ''')
+        else:
+            cur.execute('''
+                SELECT p.*, NULL as escola_nome 
+                FROM produtos p 
+                ORDER BY p.nome
+            ''')
         return cur.fetchall()
     except Exception as e:
         st.error(f"Erro ao listar produtos: {e}")
@@ -427,7 +516,16 @@ def listar_produtos_por_escola(escola_id=None):
     
     try:
         cur = conn.cursor()
-        if escola_id:
+        
+        # Verificar se a coluna escola_id existe
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='produtos' and column_name='escola_id'
+        """)
+        tem_escola_id = cur.fetchone()
+        
+        if tem_escola_id and escola_id:
             cur.execute('''
                 SELECT p.*, e.nome as escola_nome 
                 FROM produtos p 
@@ -435,11 +533,17 @@ def listar_produtos_por_escola(escola_id=None):
                 WHERE p.escola_id = %s
                 ORDER BY p.nome
             ''', (escola_id,))
-        else:
+        elif tem_escola_id:
             cur.execute('''
                 SELECT p.*, e.nome as escola_nome 
                 FROM produtos p 
                 LEFT JOIN escolas e ON p.escola_id = e.id 
+                ORDER BY p.nome
+            ''')
+        else:
+            cur.execute('''
+                SELECT p.*, NULL as escola_nome 
+                FROM produtos p 
                 ORDER BY p.nome
             ''')
         return cur.fetchall()
@@ -493,10 +597,24 @@ def adicionar_pedido(cliente_id, itens, data_entrega, forma_pagamento, observaco
         quantidade_total = sum(item['quantidade'] for item in itens)
         valor_total = sum(item['subtotal'] for item in itens)
         
-        cur.execute('''
-            INSERT INTO pedidos (cliente_id, data_entrega_prevista, forma_pagamento, quantidade_total, valor_total, observacoes)
-            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
-        ''', (cliente_id, data_entrega, forma_pagamento, quantidade_total, valor_total, observacoes))
+        # Verificar se a coluna forma_pagamento existe
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='forma_pagamento'
+        """)
+        tem_forma_pagamento = cur.fetchone()
+        
+        if tem_forma_pagamento:
+            cur.execute('''
+                INSERT INTO pedidos (cliente_id, data_entrega_prevista, forma_pagamento, quantidade_total, valor_total, observacoes)
+                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+            ''', (cliente_id, data_entrega, forma_pagamento, quantidade_total, valor_total, observacoes))
+        else:
+            cur.execute('''
+                INSERT INTO pedidos (cliente_id, data_entrega_prevista, quantidade_total, valor_total, observacoes)
+                VALUES (%s, %s, %s, %s, %s) RETURNING id
+            ''', (cliente_id, data_entrega, quantidade_total, valor_total, observacoes))
         
         pedido_id = cur.fetchone()[0]
         
@@ -526,12 +644,36 @@ def listar_pedidos():
     
     try:
         cur = conn.cursor()
-        cur.execute('''
-            SELECT p.*, c.nome as cliente_nome
-            FROM pedidos p
-            JOIN clientes c ON p.cliente_id = c.id
-            ORDER BY p.data_pedido DESC
-        ''')
+        
+        # Verificar se as colunas novas existem
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='forma_pagamento'
+        """)
+        tem_forma_pagamento = cur.fetchone()
+        
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='data_entrega_real'
+        """)
+        tem_data_entrega_real = cur.fetchone()
+        
+        if tem_forma_pagamento and tem_data_entrega_real:
+            cur.execute('''
+                SELECT p.*, c.nome as cliente_nome
+                FROM pedidos p
+                JOIN clientes c ON p.cliente_id = c.id
+                ORDER BY p.data_pedido DESC
+            ''')
+        else:
+            cur.execute('''
+                SELECT p.*, c.nome as cliente_nome
+                FROM pedidos p
+                JOIN clientes c ON p.cliente_id = c.id
+                ORDER BY p.data_pedido DESC
+            ''')
         return cur.fetchall()
     except Exception as e:
         st.error(f"Erro ao listar pedidos: {e}")
@@ -547,7 +689,15 @@ def atualizar_status_pedido(pedido_id, novo_status):
     try:
         cur = conn.cursor()
         
-        if novo_status == 'Entregue':
+        # Verificar se a coluna data_entrega_real existe
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='data_entrega_real'
+        """)
+        tem_data_entrega_real = cur.fetchone()
+        
+        if novo_status == 'Entregue' and tem_data_entrega_real:
             data_entrega = datetime.now().strftime("%Y-%m-%d")
             cur.execute('''
                 UPDATE pedidos 
@@ -647,19 +797,17 @@ def gerar_relatorio_produtos():
                 pr.categoria,
                 pr.tamanho,
                 pr.cor,
-                e.nome as escola,
                 SUM(pi.quantidade) as total_vendido,
                 SUM(pi.subtotal) as total_faturado
             FROM pedido_itens pi
             JOIN produtos pr ON pi.produto_id = pr.id
-            LEFT JOIN escolas e ON pr.escola_id = e.id
-            GROUP BY pr.id, pr.nome, pr.categoria, pr.tamanho, pr.cor, e.nome
+            GROUP BY pr.id, pr.nome, pr.categoria, pr.tamanho, pr.cor
             ORDER BY total_vendido DESC
         ''')
         dados = cur.fetchall()
         
         if dados:
-            df = pd.DataFrame(dados, columns=['Produto', 'Categoria', 'Tamanho', 'Cor', 'Escola', 'Total Vendido', 'Total Faturado (R$)'])
+            df = pd.DataFrame(dados, columns=['Produto', 'Categoria', 'Tamanho', 'Cor', 'Total Vendido', 'Total Faturado (R$)'])
             return df
         else:
             return pd.DataFrame()
@@ -822,17 +970,18 @@ if menu == "📊 Dashboard":
     
     with col1:
         if st.button("📝 Novo Pedido", use_container_width=True):
-            st.session_state.menu = "📦 Pedidos"
+            # Usando st.query_params para navegação
+            st.query_params.menu = "Pedidos"
             st.rerun()
     
     with col2:
         if st.button("👥 Cadastrar Cliente", use_container_width=True):
-            st.session_state.menu = "👥 Clientes"
+            st.query_params.menu = "Clientes"
             st.rerun()
     
     with col3:
         if st.button("👕 Cadastrar Produto", use_container_width=True):
-            st.session_state.menu = "👕 Produtos"
+            st.query_params.menu = "Produtos"
             st.rerun()
 
 elif menu == "👥 Clientes":
@@ -1152,17 +1301,21 @@ elif menu == "📦 Pedidos":
                     'Cancelado': '🔴 Cancelado'
                 }.get(pedido[2], f'⚪ {pedido[2]}')
                 
+                # Verificar se tem forma_pagamento (índice 3) e data_entrega_real (índice 6)
+                forma_pagamento = pedido[3] if len(pedido) > 3 and pedido[3] else 'Dinheiro'
+                data_entrega_real = pedido[6] if len(pedido) > 6 and pedido[6] else 'Não entregue'
+                
                 dados.append({
                     'ID': pedido[0],
-                    'Cliente': pedido[9],
+                    'Cliente': pedido[9] if len(pedido) > 9 else 'N/A',
                     'Status': status_info,
-                    'Forma Pagamento': pedido[3],
+                    'Forma Pagamento': forma_pagamento,
                     'Data Pedido': pedido[4],
                     'Entrega Prevista': pedido[5],
-                    'Entrega Real': pedido[6] or 'Não entregue',
+                    'Entrega Real': data_entrega_real,
                     'Quantidade': pedido[7],
                     'Valor Total': f"R$ {pedido[8]:.2f}",
-                    'Observações': pedido[10] or 'Nenhuma'
+                    'Observações': pedido[10] if len(pedido) > 10 and pedido[10] else 'Nenhuma'
                 })
             
             st.dataframe(pd.DataFrame(dados), use_container_width=True)
@@ -1176,14 +1329,14 @@ elif menu == "📦 Pedidos":
         if pedidos:
             pedido_selecionado = st.selectbox(
                 "Selecione o pedido:",
-                [f"Pedido #{p[0]} - {p[9]} - Status: {p[2]}" for p in pedidos]
+                [f"Pedido #{p[0]} - {p[9] if len(p) > 9 else 'N/A'} - Status: {p[2]}" for p in pedidos]
             )
             
             if pedido_selecionado:
                 pedido_id = int(pedido_selecionado.split("#")[1].split(" -")[0])
                 pedido = next(p for p in pedidos if p[0] == pedido_id)
                 
-                st.write(f"**Cliente:** {pedido[9]}")
+                st.write(f"**Cliente:** {pedido[9] if len(pedido) > 9 else 'N/A'}")
                 st.write(f"**Status atual:** {pedido[2]}")
                 st.write(f"**Valor Total:** R$ {pedido[8]:.2f}")
                 
@@ -1209,7 +1362,7 @@ elif menu == "📦 Pedidos":
         if pedidos:
             pedido_selecionado = st.selectbox(
                 "Selecione o pedido para excluir:",
-                [f"Pedido #{p[0]} - {p[9]} - R$ {p[8]:.2f}" for p in pedidos]
+                [f"Pedido #{p[0]} - {p[9] if len(p) > 9 else 'N/A'} - R$ {p[8]:.2f}" for p in pedidos]
             )
             
             if pedido_selecionado:
