@@ -970,18 +970,18 @@ if menu == "📊 Dashboard":
     
     with col1:
         if st.button("📝 Novo Pedido", use_container_width=True):
-            # Usando st.query_params para navegação
-            st.query_params.menu = "Pedidos"
+            # Usando session_state para navegação
+            st.session_state.menu = "📦 Pedidos"
             st.rerun()
     
     with col2:
         if st.button("👥 Cadastrar Cliente", use_container_width=True):
-            st.query_params.menu = "Clientes"
+            st.session_state.menu = "👥 Clientes"
             st.rerun()
     
     with col3:
         if st.button("👕 Cadastrar Produto", use_container_width=True):
-            st.query_params.menu = "Produtos"
+            st.session_state.menu = "👕 Produtos"
             st.rerun()
 
 elif menu == "👥 Clientes":
@@ -1305,6 +1305,14 @@ elif menu == "📦 Pedidos":
                 forma_pagamento = pedido[3] if len(pedido) > 3 and pedido[3] else 'Dinheiro'
                 data_entrega_real = pedido[6] if len(pedido) > 6 and pedido[6] else 'Não entregue'
                 
+                # CORREÇÃO: Converter valor_total para float antes de formatar
+                valor_total = pedido[8]
+                if isinstance(valor_total, str):
+                    try:
+                        valor_total = float(valor_total)
+                    except (ValueError, TypeError):
+                        valor_total = 0.0
+                
                 dados.append({
                     'ID': pedido[0],
                     'Cliente': pedido[9] if len(pedido) > 9 else 'N/A',
@@ -1314,7 +1322,7 @@ elif menu == "📦 Pedidos":
                     'Entrega Prevista': pedido[5],
                     'Entrega Real': data_entrega_real,
                     'Quantidade': pedido[7],
-                    'Valor Total': f"R$ {pedido[8]:.2f}",
+                    'Valor Total': f"R$ {valor_total:.2f}",
                     'Observações': pedido[10] if len(pedido) > 10 and pedido[10] else 'Nenhuma'
                 })
             
@@ -1338,7 +1346,16 @@ elif menu == "📦 Pedidos":
                 
                 st.write(f"**Cliente:** {pedido[9] if len(pedido) > 9 else 'N/A'}")
                 st.write(f"**Status atual:** {pedido[2]}")
-                st.write(f"**Valor Total:** R$ {pedido[8]:.2f}")
+                
+                # CORREÇÃO: Converter valor_total para float antes de exibir
+                valor_total = pedido[8]
+                if isinstance(valor_total, str):
+                    try:
+                        valor_total = float(valor_total)
+                    except (ValueError, TypeError):
+                        valor_total = 0.0
+                
+                st.write(f"**Valor Total:** R$ {valor_total:.2f}")
                 
                 novo_status = st.selectbox(
                     "Novo status:",
@@ -1362,7 +1379,7 @@ elif menu == "📦 Pedidos":
         if pedidos:
             pedido_selecionado = st.selectbox(
                 "Selecione o pedido para excluir:",
-                [f"Pedido #{p[0]} - {p[9] if len(p) > 9 else 'N/A'} - R$ {p[8]:.2f}" for p in pedidos]
+                [f"Pedido #{p[0]} - {p[9] if len(p) > 9 else 'N/A'} - R$ {float(p[8]):.2f}" for p in pedidos]
             )
             
             if pedido_selecionado:
@@ -1435,7 +1452,7 @@ elif menu == "📈 Relatórios":
 
 # Rodapé
 st.sidebar.markdown("---")
-st.sidebar.info("👕 Sistema de Fardamentos v8.0\n\n🗄️ **Banco de Dados PostgreSQL**")
+st.sidebar.info("👕 Sistema de Fardamentos v8.1\n\n🗄️ **Banco de Dados PostgreSQL**")
 
 # Botão para recarregar dados
 if st.sidebar.button("🔄 Recarregar Dados"):
