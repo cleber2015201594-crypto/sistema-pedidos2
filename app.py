@@ -20,29 +20,57 @@ IS_RENDER = 'RENDER' in os.environ
 # ⚡ OTIMIZAÇÕES DE PERFORMANCE - CORRIGIDAS
 # =========================================
 
+def converter_para_serializavel(dicionario):
+    """Converte valores não serializáveis em um dicionário"""
+    novo_dict = {}
+    for chave, valor in dicionario.items():
+        if isinstance(valor, (datetime, date)):
+            novo_dict[chave] = valor.isoformat()
+        elif hasattr(valor, 'to_eng_string'):  # Para Decimal
+            novo_dict[chave] = float(valor)
+        else:
+            novo_dict[chave] = valor
+    return novo_dict
+
 @st.cache_data(ttl=300)
 def listar_escolas_cached():
     escolas = listar_escolas()
-    # Converter sqlite3.Row para lista de dicionários serializáveis
-    return [dict(escola) for escola in escolas]
+    # Converter explicitamente para lista de dicionários serializáveis
+    escolas_serializaveis = []
+    for escola in escolas:
+        escola_dict = dict(escola)
+        escolas_serializaveis.append(converter_para_serializavel(escola_dict))
+    return escolas_serializaveis
 
 @st.cache_data(ttl=300)
 def listar_clientes_cached():
     clientes = listar_clientes()
-    # Converter sqlite3.Row para lista de dicionários serializáveis
-    return [dict(cliente) for cliente in clientes]
+    # Converter explicitamente para lista de dicionários serializáveis
+    clientes_serializaveis = []
+    for cliente in clientes:
+        cliente_dict = dict(cliente)
+        clientes_serializaveis.append(converter_para_serializavel(cliente_dict))
+    return clientes_serializaveis
 
 @st.cache_data(ttl=180)
 def listar_produtos_por_escola_cached(escola_id):
     produtos = listar_produtos_por_escola(escola_id)
-    # Converter sqlite3.Row para lista de dicionários serializáveis
-    return [dict(produto) for produto in produtos]
+    # Converter explicitamente para lista de dicionários serializáveis
+    produtos_serializaveis = []
+    for produto in produtos:
+        produto_dict = dict(produto)
+        produtos_serializaveis.append(converter_para_serializavel(produto_dict))
+    return produtos_serializaveis
 
 @st.cache_data(ttl=120)
 def listar_pedidos_por_escola_cached(escola_id=None):
     pedidos = listar_pedidos_por_escola(escola_id)
-    # Converter sqlite3.Row para lista de dicionários serializáveis
-    return [dict(pedido) for pedido in pedidos]
+    # Converter explicitamente para lista de dicionários serializáveis
+    pedidos_serializaveis = []
+    for pedido in pedidos:
+        pedido_dict = dict(pedido)
+        pedidos_serializaveis.append(converter_para_serializavel(pedido_dict))
+    return pedidos_serializaveis
 
 # =========================================
 # 🔐 SISTEMA DE AUTENTICAÇÃO - SQLITE
@@ -263,7 +291,9 @@ def listar_usuarios():
             FROM usuarios 
             ORDER BY username
         ''')
-        return cur.fetchall()
+        # Já retornar como dicionários
+        rows = cur.fetchall()
+        return [dict(row) for row in rows]
     except Exception as e:
         st.error(f"Erro ao listar usuários: {e}")
         return []
@@ -380,7 +410,9 @@ def listar_escolas():
     try:
         cur = conn.cursor()
         cur.execute("SELECT * FROM escolas ORDER BY nome")
-        return cur.fetchall()
+        # Já retornar como dicionários
+        rows = cur.fetchall()
+        return [dict(row) for row in rows]
     except Exception as e:
         st.error(f"Erro ao listar escolas: {e}")
         return []
@@ -435,7 +467,9 @@ def listar_clientes():
     try:
         cur = conn.cursor()
         cur.execute('SELECT * FROM clientes ORDER BY nome')
-        return cur.fetchall()
+        # Já retornar como dicionários
+        rows = cur.fetchall()
+        return [dict(row) for row in rows]
     except Exception as e:
         st.error(f"Erro ao listar clientes: {e}")
         return []
@@ -538,7 +572,9 @@ def listar_produtos_por_escola(escola_id=None):
                 LEFT JOIN escolas e ON p.escola_id = e.id 
                 ORDER BY e.nome, p.categoria, p.nome
             ''')
-        return cur.fetchall()
+        # Já retornar como dicionários
+        rows = cur.fetchall()
+        return [dict(row) for row in rows]
     except Exception as e:
         st.error(f"Erro ao listar produtos: {e}")
         return []
@@ -618,7 +654,7 @@ def adicionar_pedido(cliente_id, escola_id, itens, data_entrega, forma_pagamento
         
         for item in itens:
             cur.execute('''
-                INSERT INTO pedido_itens (pedido_id, produto_id, quantidade, preco_unitario, substotal)
+                INSERT INTO pedido_itens (pedido_id, produto_id, quantidade, preco_unitario, subtotal)
                 VALUES (?, ?, ?, ?, ?)
             ''', (pedido_id, item['produto_id'], item['quantidade'], item['preco_unitario'], item['subtotal']))
             # ⚠️ REMOVIDA A ATUALIZAÇÃO DE ESTOQUE AQUI
@@ -662,7 +698,9 @@ def listar_pedidos_por_escola(escola_id=None):
                 JOIN escolas e ON p.escola_id = e.id
                 ORDER BY p.data_pedido DESC
             ''')
-        return cur.fetchall()
+        # Já retornar como dicionários
+        rows = cur.fetchall()
+        return [dict(row) for row in rows]
     except Exception as e:
         st.error(f"Erro ao listar pedidos: {e}")
         return []
@@ -932,8 +970,8 @@ if st.session_state.tipo_usuario == 'admin':
         usuarios = listar_usuarios()
         if usuarios:
             for usuario in usuarios:
-                status = "✅ Ativo" if usuario[4] == 1 else "❌ Inativo"
-                st.write(f"**{usuario[1]}** - {usuario[2]} ({usuario[3]}) - {status}")
+                status = "✅ Ativo" if usuario['ativo'] == 1 else "❌ Inativo"
+                st.write(f"**{usuario['username']}** - {usuario['nome_completo']} ({usuario['tipo']}) - {status}")
 
 # Menu de alteração de senha
 with st.sidebar.expander("🔐 Alterar Senha"):
