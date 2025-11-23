@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
 import os
 import psycopg2
 import urllib.parse
@@ -17,7 +16,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# CSS personalizado
 st.markdown("""
 <style>
     .main-header {
@@ -27,25 +25,12 @@ st.markdown("""
         margin-bottom: 1rem;
         font-weight: bold;
     }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 # =========================================
 # 🗃️ CONEXÃO COM BANCO
 # =========================================
-
-def get_db_type():
-    return 'postgresql' if os.environ.get('DATABASE_URL') else 'sqlite'
-
-def get_placeholder():
-    return '%s' if get_db_type() == 'postgresql' else '?'
 
 def get_connection():
     try:
@@ -66,7 +51,6 @@ def get_connection():
             conn = sqlite3.connect('local.db', check_same_thread=False)
             conn.row_factory = sqlite3.Row
             return conn
-            
     except Exception as e:
         st.error(f"❌ Erro de conexão: {str(e)}")
         return None
@@ -79,97 +63,66 @@ def init_db():
     try:
         cur = conn.cursor()
         
-        if get_db_type() == 'postgresql':
-            # Tabelas PostgreSQL
-            tables = [
-                '''CREATE TABLE IF NOT EXISTS escolas (
-                    id SERIAL PRIMARY KEY,
-                    nome TEXT UNIQUE NOT NULL,
-                    endereco TEXT,
-                    telefone TEXT,
-                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''',
-                '''CREATE TABLE IF NOT EXISTS usuarios (
-                    id SERIAL PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    nome TEXT,
-                    tipo TEXT DEFAULT 'vendedor'
-                )''',
-                '''CREATE TABLE IF NOT EXISTS produtos (
-                    id SERIAL PRIMARY KEY,
-                    nome TEXT NOT NULL,
-                    categoria TEXT,
-                    tamanho TEXT,
-                    cor TEXT,
-                    preco DECIMAL(10,2),
-                    estoque INTEGER DEFAULT 0,
-                    escola_id INTEGER REFERENCES escolas(id),
-                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''',
-                '''CREATE TABLE IF NOT EXISTS clientes (
-                    id SERIAL PRIMARY KEY,
-                    nome TEXT NOT NULL,
-                    telefone TEXT,
-                    email TEXT,
-                    data_cadastro DATE DEFAULT CURRENT_DATE
-                )'''
-            ]
-            
-            for table in tables:
-                cur.execute(table)
-            
-            # Inserir dados iniciais
-            cur.execute('INSERT INTO usuarios (username, password, nome, tipo) VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO NOTHING', 
-                       ('admin', 'admin123', 'Administrador', 'admin'))
-            cur.execute('INSERT INTO escolas (nome, endereco, telefone) VALUES (%s, %s, %s) ON CONFLICT (nome) DO NOTHING', 
-                       ('Escola Principal', 'Endereço padrão', '(11) 99999-9999'))
-                
-        else:
-            # Tabelas SQLite
-            tables = [
-                '''CREATE TABLE IF NOT EXISTS escolas (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    nome TEXT UNIQUE NOT NULL,
-                    endereco TEXT,
-                    telefone TEXT,
-                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''',
-                '''CREATE TABLE IF NOT EXISTS usuarios (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    nome TEXT,
-                    tipo TEXT DEFAULT 'vendedor'
-                )''',
-                '''CREATE TABLE IF NOT EXISTS produtos (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    nome TEXT NOT NULL,
-                    categoria TEXT,
-                    tamanho TEXT,
-                    cor TEXT,
-                    preco REAL,
-                    estoque INTEGER DEFAULT 0,
-                    escola_id INTEGER,
-                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (escola_id) REFERENCES escolas (id)
-                )''',
-                '''CREATE TABLE IF NOT EXISTS clientes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    nome TEXT NOT NULL,
-                    telefone TEXT,
-                    email TEXT,
-                    data_cadastro DATE DEFAULT CURRENT_DATE
-                )'''
-            ]
-            
-            for table in tables:
-                cur.execute(table)
-            
-            cur.execute('INSERT OR IGNORE INTO usuarios (username, password, nome, tipo) VALUES (?, ?, ?, ?)', 
-                       ('admin', 'admin123', 'Administrador', 'admin'))
-            cur.execute('INSERT OR IGNORE INTO escolas (nome, endereco, telefone) VALUES (?, ?, ?)', 
-                       ('Escola Principal', 'Endereço padrão', '(11) 99999-9999'))
+        # Tabela de usuários
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                nome TEXT,
+                tipo TEXT DEFAULT 'vendedor'
+            )
+        ''')
+        
+        # Tabela de escolas
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS escolas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT UNIQUE NOT NULL,
+                endereco TEXT,
+                telefone TEXT,
+                data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Tabela de produtos
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS produtos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL,
+                categoria TEXT,
+                tamanho TEXT,
+                cor TEXT,
+                preco REAL,
+                estoque INTEGER DEFAULT 0,
+                escola_id INTEGER,
+                data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (escola_id) REFERENCES escolas (id)
+            )
+        ''')
+        
+        # Tabela de clientes
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS clientes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL,
+                telefone TEXT,
+                email TEXT,
+                data_cadastro DATE DEFAULT CURRENT_DATE
+            )
+        ''')
+        
+        # Inserir usuário admin
+        cur.execute('''
+            INSERT OR IGNORE INTO usuarios (username, password, nome, tipo) 
+            VALUES (?, ?, ?, ?)
+        ''', ('admin', 'admin123', 'Administrador', 'admin'))
+        
+        # Inserir escola padrão
+        cur.execute('''
+            INSERT OR IGNORE INTO escolas (nome, endereco, telefone) 
+            VALUES (?, ?, ?)
+        ''', ('Escola Principal', 'Endereço padrão', '(11) 99999-9999'))
         
         conn.commit()
         return True
@@ -192,24 +145,14 @@ def check_login(username, password):
     
     try:
         cur = conn.cursor()
-        placeholder = get_placeholder()
-        
-        cur.execute(f'SELECT password, nome, tipo FROM usuarios WHERE username = {placeholder}', (username,))
+        cur.execute('SELECT password, nome, tipo FROM usuarios WHERE username = ?', (username,))
         result = cur.fetchone()
         
         if result:
-            if hasattr(result, '_asdict'):
-                result_dict = result._asdict()
-            elif hasattr(result, 'keys'):
-                result_dict = dict(zip([desc[0] for desc in cur.description], result))
-            else:
-                result_dict = {'password': result[0], 'nome': result[1], 'tipo': result[2]}
-            
-            if result_dict['password'] == password:
-                return True, result_dict['nome'], result_dict['tipo']
+            if result[0] == password:
+                return True, result[1], result[2]
         
         return False, "Credenciais inválidas", None
-            
     except Exception as e:
         return False, f"Erro: {str(e)}", None
     finally:
@@ -247,7 +190,7 @@ def login_page():
         st.markdown("👤 **admin** | 🔒 **admin123**")
 
 # =========================================
-# 📊 FUNÇÕES BÁSICAS DO SISTEMA
+# 📊 FUNÇÕES BÁSICAS
 # =========================================
 
 def adicionar_escola(nome, endereco, telefone):
@@ -257,13 +200,11 @@ def adicionar_escola(nome, endereco, telefone):
     
     try:
         cur = conn.cursor()
-        placeholder = get_placeholder()
-        cur.execute(f'INSERT INTO escolas (nome, endereco, telefone) VALUES ({placeholder}, {placeholder}, {placeholder})', 
+        cur.execute('INSERT INTO escolas (nome, endereco, telefone) VALUES (?, ?, ?)', 
                    (nome, endereco, telefone))
         conn.commit()
         return True, "✅ Escola cadastrada com sucesso!"
     except Exception as e:
-        conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
         if conn:
@@ -292,13 +233,11 @@ def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, escola_id):
     
     try:
         cur = conn.cursor()
-        placeholder = get_placeholder()
-        cur.execute(f'INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, escola_id) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})', 
+        cur.execute('INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, escola_id) VALUES (?, ?, ?, ?, ?, ?, ?)', 
                    (nome, categoria, tamanho, cor, preco, estoque, escola_id))
         conn.commit()
         return True, "✅ Produto cadastrado com sucesso!"
     except Exception as e:
-        conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
         if conn:
@@ -312,8 +251,7 @@ def listar_produtos(escola_id=None):
     try:
         cur = conn.cursor()
         if escola_id:
-            placeholder = get_placeholder()
-            cur.execute(f'SELECT * FROM produtos WHERE escola_id = {placeholder} ORDER BY nome', (escola_id,))
+            cur.execute('SELECT * FROM produtos WHERE escola_id = ? ORDER BY nome', (escola_id,))
         else:
             cur.execute('SELECT * FROM produtos ORDER BY nome')
         return cur.fetchall()
@@ -331,13 +269,11 @@ def adicionar_cliente(nome, telefone, email):
     
     try:
         cur = conn.cursor()
-        placeholder = get_placeholder()
-        cur.execute(f'INSERT INTO clientes (nome, telefone, email) VALUES ({placeholder}, {placeholder}, {placeholder})', 
+        cur.execute('INSERT INTO clientes (nome, telefone, email) VALUES (?, ?, ?)', 
                    (nome, telefone, email))
         conn.commit()
         return True, "✅ Cliente cadastrado com sucesso!"
     except Exception as e:
-        conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
         if conn:
@@ -621,4 +557,4 @@ elif menu == "👕 Produtos":
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("👕 **FashionManager Pro**")
-st.sidebar.markdown("v1.0 • Sistema Básico vitor")
+st.sidebar.markdown("v2.0 • Sistema Simplificado")
