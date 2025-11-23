@@ -273,7 +273,8 @@ def init_db():
         st.error(f"❌ Erro ao criar tabelas: {str(e)}")
         return False
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # =========================================
 # 🔐 SISTEMA DE LOGIN
@@ -294,11 +295,13 @@ def check_login(username, password):
         result = cur.fetchone()
         
         if result:
+            # Converter para formato consistente
             if hasattr(result, '_asdict'):
                 result_dict = result._asdict()
             elif hasattr(result, 'keys'):
                 result_dict = dict(zip([desc[0] for desc in cur.description], result))
             else:
+                # Para SQLite tuple
                 result_dict = {'password': result[0], 'nome': result[1], 'tipo': result[2]}
             
             if result_dict['password'] == password:
@@ -309,7 +312,8 @@ def check_login(username, password):
     except Exception as e:
         return False, f"Erro: {str(e)}", None
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def login_page():
     """Página de login"""
@@ -367,7 +371,8 @@ def adicionar_escola(nome, endereco, telefone):
         conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def listar_escolas():
     """Lista todas as escolas"""
@@ -383,7 +388,8 @@ def listar_escolas():
         st.error(f"❌ Erro ao listar escolas: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def excluir_escola(id):
     """Exclui uma escola"""
@@ -403,7 +409,8 @@ def excluir_escola(id):
         conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # =========================================
 # 📊 FUNÇÕES DO SISTEMA - PRODUTOS
@@ -436,7 +443,8 @@ def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, escola_id):
         conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def listar_produtos(escola_id=None):
     """Lista produtos, opcionalmente filtrando por escola"""
@@ -457,7 +465,8 @@ def listar_produtos(escola_id=None):
         st.error(f"❌ Erro ao listar produtos: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def excluir_produto(id):
     """Exclui um produto"""
@@ -477,7 +486,8 @@ def excluir_produto(id):
         conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def atualizar_produto(id, nome, categoria, tamanho, cor, preco, estoque, escola_id):
     """Atualiza um produto"""
@@ -502,7 +512,8 @@ def atualizar_produto(id, nome, categoria, tamanho, cor, preco, estoque, escola_
         conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # =========================================
 # 📊 FUNÇÕES DO SISTEMA - CLIENTES
@@ -529,7 +540,8 @@ def adicionar_cliente(nome, telefone, email):
         conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def listar_clientes():
     """Lista todos os clientes"""
@@ -545,7 +557,8 @@ def listar_clientes():
         st.error(f"❌ Erro ao listar clientes: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def excluir_cliente(id):
     """Exclui um cliente"""
@@ -565,7 +578,8 @@ def excluir_cliente(id):
         conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def atualizar_cliente(id, nome, telefone, email):
     """Atualiza um cliente"""
@@ -589,7 +603,8 @@ def atualizar_cliente(id, nome, telefone, email):
         conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # =========================================
 # 📊 FUNÇÕES DO SISTEMA - PEDIDOS
@@ -625,7 +640,10 @@ def criar_pedido(escola_id, cliente_id, itens):
             produto_id, quantidade = item
             # Buscar preço do produto
             cur.execute(f'SELECT preco FROM produtos WHERE id = {placeholder}', (produto_id,))
-            preco_unitario = cur.fetchone()[0]
+            preco_result = cur.fetchone()
+            if not preco_result:
+                return False, f"❌ Produto com ID {produto_id} não encontrado"
+            preco_unitario = preco_result[0]
             
             query = f'''
                 INSERT INTO itens_pedido (pedido_id, produto_id, quantidade, preco_unitario)
@@ -649,7 +667,8 @@ def criar_pedido(escola_id, cliente_id, itens):
         conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def listar_pedidos(escola_id=None, status=None):
     """Lista pedidos com filtros opcionais"""
@@ -686,7 +705,8 @@ def listar_pedidos(escola_id=None, status=None):
         st.error(f"❌ Erro ao listar pedidos: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def listar_itens_pedido(pedido_id):
     """Lista itens de um pedido"""
@@ -710,7 +730,8 @@ def listar_itens_pedido(pedido_id):
         st.error(f"❌ Erro ao listar itens do pedido: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def atualizar_status_pedido(pedido_id, status):
     """Atualiza status do pedido"""
@@ -730,7 +751,8 @@ def atualizar_status_pedido(pedido_id, status):
         conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def excluir_pedido(pedido_id):
     """Exclui um pedido"""
@@ -756,7 +778,8 @@ def excluir_pedido(pedido_id):
         conn.rollback()
         return False, f"❌ Erro: {str(e)}"
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # =========================================
 # 📊 FUNÇÕES DE RELATÓRIOS
@@ -774,9 +797,9 @@ def gerar_relatorio_vendas(escola_id=None):
         dados.append({
             'Pedido': pedido[0],
             'Data': pedido[3],
-            'Cliente': pedido[7],  # cliente_nome
-            'Total': float(pedido[5]),
-            'Escola': pedido[6]   # escola_nome
+            'Cliente': pedido[7] if len(pedido) > 7 else 'N/A',  # cliente_nome
+            'Total': float(pedido[5]) if pedido[5] else 0.0,
+            'Escola': pedido[6] if len(pedido) > 6 else 'N/A'   # escola_nome
         })
     
     return pd.DataFrame(dados)
@@ -814,9 +837,9 @@ def gerar_relatorio_produtos_mais_vendidos(escola_id=None):
         for row in resultados:
             dados.append({
                 'Produto': row[0],
-                'Categoria': row[1],
-                'Quantidade Vendida': row[2],
-                'Receita Total': float(row[3])
+                'Categoria': row[1] if row[1] else 'Sem categoria',
+                'Quantidade Vendida': row[2] if row[2] else 0,
+                'Receita Total': float(row[3]) if row[3] else 0.0
             })
         
         return pd.DataFrame(dados)
@@ -824,7 +847,8 @@ def gerar_relatorio_produtos_mais_vendidos(escola_id=None):
         st.error(f"❌ Erro ao gerar relatório: {e}")
         return pd.DataFrame()
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 # =========================================
 # 🎯 INICIALIZAÇÃO
@@ -834,6 +858,8 @@ def gerar_relatorio_produtos_mais_vendidos(escola_id=None):
 if 'db_initialized' not in st.session_state:
     if init_db():
         st.session_state.db_initialized = True
+    else:
+        st.error("❌ Falha ao inicializar o banco de dados")
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -851,14 +877,16 @@ with st.sidebar:
     st.markdown(f"**🎯 {st.session_state.user_type}**")
     st.markdown("---")
     
-    menu = st.radio("Navegação", [
+    menu_options = [
         "📊 Dashboard",
         "🏫 Escolas", 
         "👥 Clientes",
         "👕 Produtos",
         "📦 Pedidos", 
         "📈 Relatórios"
-    ])
+    ]
+    
+    menu = st.radio("Navegação", menu_options)
     
     st.markdown("---")
     if st.button("🚪 Sair"):
@@ -911,7 +939,7 @@ if menu == "📊 Dashboard":
             
             with col3:
                 produtos_lista = listar_produtos(escola[0])
-                estoque_total = sum(p[6] for p in produtos_lista)
+                estoque_total = sum(p[6] for p in produtos_lista if p[6])
                 st.metric("📊 Estoque Total", estoque_total)
     
     # Ações rápidas
@@ -966,9 +994,12 @@ elif menu == "🏫 Escolas":
                 
                 with col4:
                     if st.button("🗑️", key=f"del_escola_{escola[0]}"):
-                        if excluir_escola(escola[0])[0]:
-                            st.success("✅ Escola excluída com sucesso!")
+                        success, msg = excluir_escola(escola[0])
+                        if success:
+                            st.success(msg)
                             st.rerun()
+                        else:
+                            st.error(msg)
                 
                 # Edição inline
                 if st.session_state.get('editando_escola') == escola[0]:
@@ -980,8 +1011,8 @@ elif menu == "🏫 Escolas":
                         col1, col2 = st.columns(2)
                         with col1:
                             if st.form_submit_button("✅ Salvar"):
-                                # Implementar atualização
-                                st.success("✅ Escola atualizada com sucesso!")
+                                # Implementar atualização - função não implementada ainda
+                                st.info("🔧 Funcionalidade de edição em desenvolvimento")
                                 del st.session_state.editando_escola
                                 st.rerun()
                         with col2:
@@ -1042,9 +1073,12 @@ elif menu == "👥 Clientes":
                 
                 with col4:
                     if st.button("🗑️", key=f"del_cliente_{cliente[0]}"):
-                        if excluir_cliente(cliente[0])[0]:
-                            st.success("✅ Cliente excluído com sucesso!")
+                        success, msg = excluir_cliente(cliente[0])
+                        if success:
+                            st.success(msg)
                             st.rerun()
+                        else:
+                            st.error(msg)
                 
                 # Edição inline
                 if st.session_state.get('editando_cliente') == cliente[0]:
@@ -1111,11 +1145,12 @@ elif menu == "👕 Produtos":
                                    format_func=lambda x: escola_options[x])
         
         with col2:
-            categorias = ["Todas"] + list(set([p[2] for p in listar_produtos() if p[2]]))
+            produtos_todos = listar_produtos()
+            categorias = ["Todas"] + list(set([p[2] for p in produtos_todos if p[2]]))
             categoria = st.selectbox("Filtrar por categoria", options=categorias)
         
         with col3:
-            tamanhos = ["Todos"] + list(set([p[3] for p in listar_produtos() if p[3]]))
+            tamanhos = ["Todos"] + list(set([p[3] for p in produtos_todos if p[3]]))
             tamanho = st.selectbox("Filtrar por tamanho", options=tamanhos)
         
         # Busca
@@ -1142,11 +1177,12 @@ elif menu == "👕 Produtos":
                     st.write(f"🏫 {escola_nome} | 📁 {produto[2]} | 📏 {produto[3]} | 🎨 {produto[4]}")
                 
                 with col2:
-                    st.write(f"💵 R$ {float(produto[5]):.2f}")
+                    st.write(f"💵 R$ {float(produto[5]):.2f}" if produto[5] else "💵 R$ 0.00")
                 
                 with col3:
-                    status = "✅" if produto[6] >= 5 else "⚠️" if produto[6] > 0 else "❌"
-                    st.write(f"{status} {produto[6]} un")
+                    estoque = produto[6] if produto[6] else 0
+                    status = "✅" if estoque >= 5 else "⚠️" if estoque > 0 else "❌"
+                    st.write(f"{status} {estoque} un")
                 
                 with col4:
                     if st.button("✏️", key=f"edit_prod_{produto[0]}"):
@@ -1154,9 +1190,12 @@ elif menu == "👕 Produtos":
                 
                 with col5:
                     if st.button("🗑️", key=f"del_prod_{produto[0]}"):
-                        if excluir_produto(produto[0])[0]:
-                            st.success("✅ Produto excluído com sucesso!")
+                        success, msg = excluir_produto(produto[0])
+                        if success:
+                            st.success(msg)
                             st.rerun()
+                        else:
+                            st.error(msg)
                 
                 # Edição inline
                 if st.session_state.get('editando_produto') == produto[0]:
@@ -1164,22 +1203,24 @@ elif menu == "👕 Produtos":
                         col1, col2 = st.columns(2)
                         with col1:
                             nome = st.text_input("Nome", value=produto[1])
-                            categoria = st.selectbox("Categoria", ["Camisetas", "Calças", "Agasalhos", "Acessórios"], 
-                                                   index=["Camisetas", "Calças", "Agasalhos", "Acessórios"].index(produto[2]) if produto[2] in ["Camisetas", "Calças", "Agasalhos", "Acessórios"] else 0)
-                            tamanho = st.selectbox("Tamanho", ["P", "M", "G", "GG", "2", "4", "6", "8", "10", "12"],
-                                                 index=["P", "M", "G", "GG", "2", "4", "6", "8", "10", "12"].index(produto[3]) if produto[3] in ["P", "M", "G", "GG", "2", "4", "6", "8", "10", "12"] else 0)
+                            categorias_opcoes = ["Camisetas", "Calças", "Agasalhos", "Acessórios"]
+                            categoria_idx = categorias_opcoes.index(produto[2]) if produto[2] in categorias_opcoes else 0
+                            categoria = st.selectbox("Categoria", categorias_opcoes, index=categoria_idx)
+                            tamanhos_opcoes = ["P", "M", "G", "GG", "2", "4", "6", "8", "10", "12"]
+                            tamanho_idx = tamanhos_opcoes.index(produto[3]) if produto[3] in tamanhos_opcoes else 0
+                            tamanho = st.selectbox("Tamanho", tamanhos_opcoes, index=tamanho_idx)
                         with col2:
-                            cor = st.text_input("Cor", value=produto[4])
-                            preco = st.number_input("Preço", min_value=0.0, value=float(produto[5]))
-                            estoque = st.number_input("Estoque", min_value=0, value=produto[6])
-                            escola_id = st.selectbox("Escola", options=[e[0] for e in escolas], 
-                                                   format_func=lambda x: next((e[1] for e in escolas if e[0] == x), "N/A"),
-                                                   index=[e[0] for e in escolas].index(produto[7]) if produto[7] in [e[0] for e in escolas] else 0)
+                            cor = st.text_input("Cor", value=produto[4] or "")
+                            preco = st.number_input("Preço", min_value=0.0, value=float(produto[5]) if produto[5] else 0.0)
+                            estoque = st.number_input("Estoque", min_value=0, value=produto[6] if produto[6] else 0)
+                            escola_id_edit = st.selectbox("Escola", options=[e[0] for e in escolas], 
+                                                       format_func=lambda x: next((e[1] for e in escolas if e[0] == x), "N/A"),
+                                                       index=[e[0] for e in escolas].index(produto[7]) if produto[7] in [e[0] for e in escolas] else 0)
                         
                         col1, col2 = st.columns(2)
                         with col1:
                             if st.form_submit_button("✅ Salvar"):
-                                success, msg = atualizar_produto(produto[0], nome, categoria, tamanho, cor, preco, estoque, escola_id)
+                                success, msg = atualizar_produto(produto[0], nome, categoria, tamanho, cor, preco, estoque, escola_id_edit)
                                 if success:
                                     st.success(msg)
                                     del st.session_state.editando_produto
@@ -1230,10 +1271,11 @@ elif menu == "👕 Produtos":
             total_produtos = len(listar_produtos())
             st.metric("Total de Produtos", total_produtos)
         with col2:
-            total_estoque = sum(p[6] for p in listar_produtos())
+            produtos_todos = listar_produtos()
+            total_estoque = sum(p[6] for p in produtos_todos if p[6])
             st.metric("Estoque Total", total_estoque)
         with col3:
-            produtos_baixo_estoque = len([p for p in listar_produtos() if p[6] < 5])
+            produtos_baixo_estoque = len([p for p in produtos_todos if p[6] and p[6] < 5])
             st.metric("Produtos com Estoque Baixo", produtos_baixo_estoque)
         
         # Gráfico de categorias
@@ -1324,26 +1366,32 @@ elif menu == "📦 Pedidos":
                     col1, col2, col3 = st.columns([2, 1, 1])
                     with col1:
                         st.write(f"**Data:** {pedido[3]}")
-                        st.write(f"**Total:** R$ {float(pedido[5]):.2f}")
+                        st.write(f"**Total:** R$ {float(pedido[5]):.2f}" if pedido[5] else "**Total:** R$ 0.00")
                     
                     with col2:
                         if st.button("✅ Marcar como Entregue", key=f"entregue_{pedido[0]}"):
-                            if atualizar_status_pedido(pedido[0], 'entregue')[0]:
-                                st.success("✅ Pedido marcado como entregue!")
+                            success, msg = atualizar_status_pedido(pedido[0], 'entregue')
+                            if success:
+                                st.success(msg)
                                 st.rerun()
+                            else:
+                                st.error(msg)
                     
                     with col3:
                         if st.button("🗑️ Excluir", key=f"del_ped_{pedido[0]}"):
-                            if excluir_pedido(pedido[0])[0]:
-                                st.success("✅ Pedido excluído com sucesso!")
+                            success, msg = excluir_pedido(pedido[0])
+                            if success:
+                                st.success(msg)
                                 st.rerun()
+                            else:
+                                st.error(msg)
                     
                     # Itens do pedido
                     itens = listar_itens_pedido(pedido[0])
                     if itens:
                         st.write("**Itens:**")
                         for item in itens:
-                            st.write(f"- {item[5]}: {item[3]} x R$ {float(item[4]):.2f}")
+                            st.write(f"- {item[5] if len(item) > 5 else 'Produto'}: {item[3]} x R$ {float(item[4]):.2f}" if item[4] else f"- {item[5] if len(item) > 5 else 'Produto'}: {item[3]} x R$ 0.00")
         else:
             st.info("📝 Nenhum pedido em andamento")
     
@@ -1355,14 +1403,14 @@ elif menu == "📦 Pedidos":
             for pedido in pedidos:
                 with st.expander(f"📦 Pedido #{pedido[0]} - {pedido[6]} (Cliente: {pedido[7]})"):
                     st.write(f"**Data:** {pedido[3]}")
-                    st.write(f"**Total:** R$ {float(pedido[5]):.2f}")
+                    st.write(f"**Total:** R$ {float(pedido[5]):.2f}" if pedido[5] else "**Total:** R$ 0.00")
                     
                     # Itens do pedido
                     itens = listar_itens_pedido(pedido[0])
                     if itens:
                         st.write("**Itens:**")
                         for item in itens:
-                            st.write(f"- {item[5]}: {item[3]} x R$ {float(item[4]):.2f}")
+                            st.write(f"- {item[5] if len(item) > 5 else 'Produto'}: {item[3]} x R$ {float(item[4]):.2f}" if item[4] else f"- {item[5] if len(item) > 5 else 'Produto'}: {item[3]} x R$ 0.00")
         else:
             st.info("📝 Nenhum pedido entregue")
 
@@ -1402,11 +1450,14 @@ elif menu == "📈 Relatórios":
             
             # Gráfico de vendas por data
             if len(df_vendas) > 1:
-                df_vendas['Data'] = pd.to_datetime(df_vendas['Data'])
-                vendas_por_data = df_vendas.groupby(df_vendas['Data'].dt.date)['Total'].sum().reset_index()
-                
-                fig = px.line(vendas_por_data, x='Data', y='Total', title='Evolução de Vendas')
-                st.plotly_chart(fig, use_container_width=True)
+                try:
+                    df_vendas['Data'] = pd.to_datetime(df_vendas['Data'])
+                    vendas_por_data = df_vendas.groupby(df_vendas['Data'].dt.date)['Total'].sum().reset_index()
+                    
+                    fig = px.line(vendas_por_data, x='Data', y='Total', title='Evolução de Vendas')
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Não foi possível gerar o gráfico: {e}")
         else:
             st.info("📝 Nenhuma venda registrada")
     
