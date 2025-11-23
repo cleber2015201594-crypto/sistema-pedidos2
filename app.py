@@ -55,26 +55,18 @@ def get_connection():
         database_url = os.environ.get('DATABASE_URL')
         
         if database_url:
-            # PostgreSQL no Render
-            parsed_url = urllib.parse.urlparse(database_url)
-            conn = psycopg2.connect(
-                database=parsed_url.path[1:],
-                user=parsed_url.username,
-                password=parsed_url.password,
-                host=parsed_url.hostname,
-                port=parsed_url.port,
-                sslmode='require'
-            )
+            # PostgreSQL no Render - usar a URL diretamente
+            conn = psycopg2.connect(database_url, sslmode='require')
             return conn
         else:
             # SQLite local para desenvolvimento
+            import sqlite3
             conn = sqlite3.connect('fashionmanager.db', check_same_thread=False)
             conn.row_factory = sqlite3.Row
             return conn
     except Exception as e:
         st.error(f"❌ Erro de conexão: {str(e)}")
         return None
-
 def init_db():
     """Inicializa o banco de dados com tabelas necessárias"""
     conn = get_connection()
@@ -84,99 +76,174 @@ def init_db():
     try:
         cur = conn.cursor()
         
-        # Tabela de usuários
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS usuarios (
-                id SERIAL PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL,
-                nome TEXT,
-                tipo TEXT DEFAULT 'vendedor',
-                data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # Verificar se estamos usando PostgreSQL ou SQLite
+        is_postgres = os.environ.get('DATABASE_URL') is not None
         
-        # Tabela de escolas
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS escolas (
-                id SERIAL PRIMARY KEY,
-                nome TEXT UNIQUE NOT NULL,
-                endereco TEXT,
-                telefone TEXT,
-                email TEXT,
-                data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Tabela de produtos
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS produtos (
-                id SERIAL PRIMARY KEY,
-                nome TEXT NOT NULL,
-                categoria TEXT,
-                tamanho TEXT,
-                cor TEXT,
-                preco DECIMAL(10,2),
-                estoque INTEGER DEFAULT 0,
-                escola_id INTEGER,
-                data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (escola_id) REFERENCES escolas(id)
-            )
-        ''')
-        
-        # Tabela de clientes
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS clientes (
-                id SERIAL PRIMARY KEY,
-                nome TEXT NOT NULL,
-                telefone TEXT,
-                email TEXT,
-                escola_id INTEGER,
-                data_cadastro DATE DEFAULT CURRENT_DATE,
-                FOREIGN KEY (escola_id) REFERENCES escolas(id)
-            )
-        ''')
-        
-        # Tabela de pedidos
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS pedidos (
-                id SERIAL PRIMARY KEY,
-                cliente_id INTEGER,
-                escola_id INTEGER,
-                data_pedido TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                status TEXT DEFAULT 'pendente',
-                total DECIMAL(10,2) DEFAULT 0,
-                FOREIGN KEY (cliente_id) REFERENCES clientes(id),
-                FOREIGN KEY (escola_id) REFERENCES escolas(id)
-            )
-        ''')
-        
-        # Tabela de itens do pedido
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS itens_pedido (
-                id SERIAL PRIMARY KEY,
-                pedido_id INTEGER,
-                produto_id INTEGER,
-                quantidade INTEGER,
-                preco_unitario DECIMAL(10,2),
-                FOREIGN KEY (pedido_id) REFERENCES pedidos(id),
-                FOREIGN KEY (produto_id) REFERENCES produtos(id)
-            )
-        ''')
-        
-        # Inserir usuário admin padrão
-        cur.execute('''
-            INSERT INTO usuarios (username, password, nome, tipo) 
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (username) DO NOTHING
-        ''', ('admin', 'admin123', 'Administrador', 'admin'))
-        
-        # Inserir escola padrão
-        cur.execute('''
-            INSERT INTO escolas (nome, endereco, telefone, email) 
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (nome) DO NOTHING
-        ''', ('Escola Principal', 'Endereço padrão', '(11) 99999-9999', 'contato@escola.com'))
+        if is_postgres:
+            # PostgreSQL - usar SERIAL para auto-increment
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id SERIAL PRIMARY KEY,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    nome TEXT,
+                    tipo TEXT DEFAULT 'vendedor',
+                    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS escolas (
+                    id SERIAL PRIMARY KEY,
+                    nome TEXT UNIQUE NOT NULL,
+                    endereco TEXT,
+                    telefone TEXT,
+                    email TEXT,
+                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS produtos (
+                    id SERIAL PRIMARY KEY,
+                    nome TEXT NOT NULL,
+                    categoria TEXT,
+                    tamanho TEXT,
+                    cor TEXT,
+                    preco DECIMAL(10,2),
+                    estoque INTEGER DEFAULT 0,
+                    escola_id INTEGER,
+                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS clientes (
+                    id SERIAL PRIMARY KEY,
+                    nome TEXT NOT NULL,
+                    telefone TEXT,
+                    email TEXT,
+                    escola_id INTEGER,
+                    data_cadastro DATE DEFAULT CURRENT_DATE
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS pedidos (
+                    id SERIAL PRIMARY KEY,
+                    cliente_id INTEGER,
+                    escola_id INTEGER,
+                    data_pedido TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    status TEXT DEFAULT 'pendente',
+                    total DECIMAL(10,2) DEFAULT 0
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS itens_pedido (
+                    id SERIAL PRIMARY KEY,
+                    pedido_id INTEGER,
+                    produto_id INTEGER,
+                    quantidade INTEGER,
+                    preco_unitario DECIMAL(10,2)
+                )
+            ''')
+            
+            # Inserir usuário admin padrão
+            cur.execute('''
+                INSERT INTO usuarios (username, password, nome, tipo) 
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (username) DO NOTHING
+            ''', ('admin', 'admin123', 'Administrador', 'admin'))
+            
+            # Inserir escola padrão
+            cur.execute('''
+                INSERT INTO escolas (nome, endereco, telefone, email) 
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (nome) DO NOTHING
+            ''', ('Escola Principal', 'Endereço padrão', '(11) 99999-9999', 'contato@escola.com'))
+                
+        else:
+            # SQLite local
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    nome TEXT,
+                    tipo TEXT DEFAULT 'vendedor',
+                    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS escolas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nome TEXT UNIQUE NOT NULL,
+                    endereco TEXT,
+                    telefone TEXT,
+                    email TEXT,
+                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS produtos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nome TEXT NOT NULL,
+                    categoria TEXT,
+                    tamanho TEXT,
+                    cor TEXT,
+                    preco REAL,
+                    estoque INTEGER DEFAULT 0,
+                    escola_id INTEGER,
+                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS clientes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nome TEXT NOT NULL,
+                    telefone TEXT,
+                    email TEXT,
+                    escola_id INTEGER,
+                    data_cadastro DATE DEFAULT CURRENT_DATE
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS pedidos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cliente_id INTEGER,
+                    escola_id INTEGER,
+                    data_pedido TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    status TEXT DEFAULT 'pendente',
+                    total REAL DEFAULT 0
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS itens_pedido (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pedido_id INTEGER,
+                    produto_id INTEGER,
+                    quantidade INTEGER,
+                    preco_unitario REAL
+                )
+            ''')
+            
+            # Inserir usuário admin padrão
+            cur.execute('''
+                INSERT OR IGNORE INTO usuarios (username, password, nome, tipo) 
+                VALUES (?, ?, ?, ?)
+            ''', ('admin', 'admin123', 'Administrador', 'admin'))
+            
+            # Inserir escola padrão
+            cur.execute('''
+                INSERT OR IGNORE INTO escolas (nome, endereco, telefone, email) 
+                VALUES (?, ?, ?, ?)
+            ''', ('Escola Principal', 'Endereço padrão', '(11) 99999-9999', 'contato@escola.com'))
         
         conn.commit()
         return True
@@ -257,32 +324,22 @@ def adicionar_escola(nome, endereco, telefone, email):
     
     try:
         cur = conn.cursor()
-        cur.execute(
-            'INSERT INTO escolas (nome, endereco, telefone, email) VALUES (%s, %s, %s, %s)',
-            (nome, endereco, telefone, email)
-        )
+        placeholder = get_placeholder()
+        def get_placeholder():
+    """Retorna o placeholder correto para o banco"""
+    return '%s' if os.environ.get('DATABASE_URL') else '?'
+        
+        query = f'''
+            INSERT INTO escolas (nome, endereco, telefone, email) 
+            VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})
+        '''
+        cur.execute(query, (nome, endereco, telefone, email))
         conn.commit()
         return True, "✅ Escola cadastrada com sucesso!"
     except Exception as e:
-        conn.rollback()
-        return False, f"❌ Erro: {str(e)}"
-    finally:
         if conn:
-            conn.close()
-
-def listar_escolas():
-    """Lista todas as escolas"""
-    conn = get_connection()
-    if not conn:
-        return []
-    
-    try:
-        cur = conn.cursor()
-        cur.execute('SELECT * FROM escolas ORDER BY nome')
-        return cur.fetchall()
-    except Exception as e:
-        st.error(f"❌ Erro ao listar escolas: {e}")
-        return []
+            conn.rollback()
+        return False, f"❌ Erro: {str(e)}"
     finally:
         if conn:
             conn.close()
