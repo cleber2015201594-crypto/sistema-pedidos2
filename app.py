@@ -1,916 +1,1459 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from datetime import datetime, date
+import json
 import os
+import hashlib
 import psycopg2
-import urllib.parse
-import sqlite3
-from datetime import datetime
+from psycopg2.extras import RealDictCursor
+import urllib.parse as urlparse
 
 # =========================================
-# 🎨 CONFIGURAÇÃO DO APP - RESPONSIVA
+# 🔐 SISTEMA DE AUTENTICAÇÃO AVANÇADO
 # =========================================
 
-st.set_page_config(
-    page_title="FashionManager Pro",
-    page_icon="👕",
-    layout="wide",
-    initial_sidebar_state="auto"
-)
+def make_hashes(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
 
-# CSS personalizado para responsividade
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 1.8rem;
-        color: #6A0DAD;
-        text-align: center;
-        margin-bottom: 1rem;
-        font-weight: bold;
-    }
-    
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-        margin: 0.5rem 0;
-    }
-    
-    .school-card {
-        background: linear-gradient(135deg, #00b09b 0%, #96c93d 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        margin: 0.5rem 0;
-    }
-    
-    /* Responsividade */
-    @media (max-width: 768px) {
-        .main-header {
-            font-size: 1.5rem;
-        }
-        
-        .sidebar .sidebar-content {
-            width: 80px;
-        }
-        
-        div[data-testid="stHorizontalBlock"] {
-            flex-direction: column;
-        }
-        
-        div[data-testid="column"] {
-            width: 100% !important;
-            margin-bottom: 1rem;
-        }
-    }
-    
-    /* Melhorias para mobile */
-    .mobile-friendly {
-        padding: 0.5rem;
-    }
-    
-    .mobile-button {
-        width: 100%;
-        margin: 0.2rem 0;
-    }
-</style>
-""", unsafe_allow_html=True)
+def check_hashes(password, hashed_text):
+    return make_hashes(password) == hashed_text
 
-# =========================================
-# 🗃️ CONEXÃO COM BANCO - CORRIGIDA
-# =========================================
-
-def get_connection():
-    """Estabelece conexão com PostgreSQL (Render) ou SQLite (local)"""
-    try:
-        database_url = os.environ.get('DATABASE_URL')
-        
-        if database_url:
-            # ✅ CORREÇÃO: Método robusto para PostgreSQL
-            if database_url.startswith('postgres://'):
-                database_url = database_url.replace('postgres://', 'postgresql://', 1)
-            
-            # ✅ CORREÇÃO: Usar parse para extrair componentes da URL
-            parsed = urllib.parse.urlparse(database_url)
-            
-            # Extrair credenciais da URL
-            username = parsed.username
-            password = parsed.password
-            hostname = parsed.hostname
-            port = parsed.port or 5432
-            database = parsed.path[1:]  # Remove a barra inicial
-            
-            # ✅ CORREÇÃO: Conexão com parâmetros nomeados corretos
-            conn = psycopg2.connect(
-                host=hostname,
-                database=database,
-                user=username,
-                password=password,  # ✅ Nome correto do parâmetro
-                port=port,
-                sslmode='require'
-            )
-            return conn
-        else:
-            # SQLite local para desenvolvimento
-            conn = sqlite3.connect('fashionmanager.db', check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            return conn
-    except Exception as e:
-        st.error(f"❌ Erro de conexão: {str(e)}")
-        # Tentar conexão alternativa
-        return try_alternative_connection()
-
-def try_alternative_connection():
-    """Tenta conexão alternativa com PostgreSQL"""
-    try:
-        # Tentar com variáveis de ambiente individuais
-        db_host = os.environ.get('DB_HOST')
-        db_name = os.environ.get('DB_NAME')
-        db_user = os.environ.get('DB_USER')
-        db_password = os.environ.get('DB_PASSWORD')  # ✅ Nome correto
-        db_port = os.environ.get('DB_PORT', '5432')
-        
-        if all([db_host, db_name, db_user, db_password]):
-            conn = psycopg2.connect(
-                host=db_host,
-                database=db_name,
-                user=db_user,
-                password=db_password,  # ✅ Nome correto
-                port=db_port
-            )
-            return conn
-        else:
-            # Fallback para SQLite
-            conn = sqlite3.connect('fashionmanager.db', check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            return conn
-    except Exception as e:
-        st.error(f"❌ Erro na conexão alternativa: {str(e)}")
-        # Último fallback - SQLite local
-        try:
-            conn = sqlite3.connect('fashionmanager.db', check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            st.info("📁 Usando banco SQLite local")
-            return conn
-        except Exception as sqlite_error:
-            st.error(f"❌ Erro crítico: {sqlite_error}")
-            return None
-
-def get_placeholder():
-    """Retorna o placeholder correto para o banco"""
-    return '%s' if os.environ.get('DATABASE_URL') or os.environ.get('DB_HOST') else '?'
-
-def formatar_data_brasil(data):
-    """Formata data para o padrão brasileiro DD/MM/YYYY"""
-    if data is None:
-        return "N/A"
-    
-    try:
-        # Se for string, converter para datetime
-        if isinstance(data, str):
-            # Tentar diferentes formatos
-            for fmt in ['%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%d/%m/%Y', '%d/%m/%Y %H:%M:%S']:
-                try:
-                    data = datetime.strptime(data, fmt)
-                    break
-                except ValueError:
-                    continue
-        
-        # Se for datetime, formatar
-        if isinstance(data, datetime):
-            return data.strftime('%d/%m/%Y')
-        else:
-            return str(data)
-    except Exception:
-        return str(data)
-
-def init_db():
-    """Inicializa o banco de dados com tabelas necessárias"""
+def atualizar_estrutura_banco():
+    """Atualiza a estrutura do banco se necessário"""
     conn = get_connection()
     if not conn:
-        st.error("❌ Não foi possível conectar ao banco de dados")
         return False
     
     try:
         cur = conn.cursor()
         
-        # Verificar se estamos usando PostgreSQL ou SQLite
-        is_postgres = os.environ.get('DATABASE_URL') is not None or os.environ.get('DB_HOST') is not None
+        # Verificar se a coluna escola_id existe na tabela produtos
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='produtos' and column_name='escola_id'
+        """)
+        resultado = cur.fetchone()
         
-        if is_postgres:
-            # ✅ CORREÇÃO: PostgreSQL - usar sintaxe correta
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS usuarios (
-                    id SERIAL PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    nome TEXT,
-                    tipo TEXT DEFAULT 'vendedor',
-                    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS escolas (
-                    id SERIAL PRIMARY KEY,
-                    nome TEXT UNIQUE NOT NULL,
-                    endereco TEXT,
-                    telefone TEXT,
-                    email TEXT,
-                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS produtos (
-                    id SERIAL PRIMARY KEY,
-                    nome TEXT NOT NULL,
-                    categoria TEXT,
-                    tamanho TEXT,
-                    cor TEXT,
-                    preco DECIMAL(10,2),
-                    estoque INTEGER DEFAULT 0,
-                    escola_id INTEGER,
-                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS clientes (
-                    id SERIAL PRIMARY KEY,
-                    nome TEXT NOT NULL,
-                    telefone TEXT,
-                    email TEXT,
-                    escola_id INTEGER,
-                    data_cadastro DATE DEFAULT CURRENT_DATE
-                )
-            ''')
-            
-            # Inserir usuários padrão
-            usuarios_padrao = [
-                ('admin', 'admin123', 'Administrador Principal', 'admin'),
-                ('vendedor', 'venda123', 'Vendedor Padrão', 'vendedor')
-            ]
-            
-            for usuario in usuarios_padrao:
-                cur.execute('''
-                    INSERT INTO usuarios (username, password, nome, tipo) 
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (username) DO NOTHING
-                ''', usuario)
-            
-            # Inserir escola padrão
-            cur.execute('''
-                INSERT INTO escolas (nome, endereco, telefone, email) 
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (nome) DO NOTHING
-            ''', ('Escola Principal', 'Endereço padrão', '(11) 99999-9999', 'contato@escola.com'))
-                
-        else:
-            # SQLite local
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS usuarios (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    nome TEXT,
-                    tipo TEXT DEFAULT 'vendedor',
-                    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS escolas (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    nome TEXT UNIQUE NOT NULL,
-                    endereco TEXT,
-                    telefone TEXT,
-                    email TEXT,
-                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS produtos (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    nome TEXT NOT NULL,
-                    categoria TEXT,
-                    tamanho TEXT,
-                    cor TEXT,
-                    preco REAL,
-                    estoque INTEGER DEFAULT 0,
-                    escola_id INTEGER,
-                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS clientes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    nome TEXT NOT NULL,
-                    telefone TEXT,
-                    email TEXT,
-                    escola_id INTEGER,
-                    data_cadastro DATE DEFAULT CURRENT_DATE
-                )
-            ''')
-            
-            # Inserir usuários padrão
-            usuarios_padrao = [
-                ('admin', 'admin123', 'Administrador Principal', 'admin'),
-                ('vendedor', 'venda123', 'Vendedor Padrão', 'vendedor')
-            ]
-            
-            for usuario in usuarios_padrao:
-                cur.execute('''
-                    INSERT OR IGNORE INTO usuarios (username, password, nome, tipo) 
-                    VALUES (?, ?, ?, ?)
-                ''', usuario)
-            
-            # Inserir escola padrão
-            cur.execute('''
-                INSERT OR IGNORE INTO escolas (nome, endereco, telefone, email) 
-                VALUES (?, ?, ?, ?)
-            ''', ('Escola Principal', 'Endereço padrão', '(11) 99999-9999', 'contato@escola.com'))
+        if not resultado:
+            # Adicionar coluna escola_id se não existir
+            cur.execute('ALTER TABLE produtos ADD COLUMN escola_id INTEGER REFERENCES escolas(id)')
+            st.success("✅ Estrutura do banco atualizada: coluna escola_id adicionada")
+        
+        # Verificar se a coluna forma_pagamento existe na tabela pedidos
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='forma_pagamento'
+        """)
+        resultado = cur.fetchone()
+        
+        if not resultado:
+            # Adicionar coluna forma_pagamento se não existir
+            cur.execute('ALTER TABLE pedidos ADD COLUMN forma_pagamento VARCHAR(50) DEFAULT \'Dinheiro\'')
+            st.success("✅ Estrutura do banco atualizada: coluna forma_pagamento adicionada")
+        
+        # Verificar se a coluna data_entrega_real existe na tabela pedidos
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='data_entrega_real'
+        """)
+        resultado = cur.fetchone()
+        
+        if not resultado:
+            # Adicionar coluna data_entrega_real se não existir
+            cur.execute('ALTER TABLE pedidos ADD COLUMN data_entrega_real DATE')
+            st.success("✅ Estrutura do banco atualizada: coluna data_entrega_real adicionada")
         
         conn.commit()
-        st.success("✅ Banco de dados inicializado com sucesso!")
         return True
         
     except Exception as e:
-        st.error(f"❌ Erro ao criar tabelas: {str(e)}")
+        conn.rollback()
+        st.error(f"Erro ao atualizar estrutura do banco: {str(e)}")
         return False
     finally:
-        if conn:
+        conn.close()
+
+def init_db():
+    """Inicializa o banco de dados e cria tabelas necessárias"""
+    conn = get_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            
+            # Tabela de usuários
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id SERIAL PRIMARY KEY,
+                    username VARCHAR(50) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    nome_completo VARCHAR(100),
+                    tipo VARCHAR(20) DEFAULT 'vendedor',
+                    ativo BOOLEAN DEFAULT TRUE,
+                    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Tabela de escolas
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS escolas (
+                    id SERIAL PRIMARY KEY,
+                    nome VARCHAR(100) UNIQUE NOT NULL
+                )
+            ''')
+            
+            # Tabela de clientes
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS clientes (
+                    id SERIAL PRIMARY KEY,
+                    nome VARCHAR(200) NOT NULL,
+                    telefone VARCHAR(20),
+                    email VARCHAR(100),
+                    data_cadastro DATE DEFAULT CURRENT_DATE
+                )
+            ''')
+            
+            # Tabela de produtos (SEM escola_id inicialmente - será adicionada depois)
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS produtos (
+                    id SERIAL PRIMARY KEY,
+                    nome VARCHAR(200) NOT NULL,
+                    categoria VARCHAR(100),
+                    tamanho VARCHAR(10),
+                    cor VARCHAR(50),
+                    preco DECIMAL(10,2),
+                    estoque INTEGER DEFAULT 0,
+                    descricao TEXT,
+                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Tabela de pedidos
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS pedidos (
+                    id SERIAL PRIMARY KEY,
+                    cliente_id INTEGER REFERENCES clientes(id),
+                    status VARCHAR(50) DEFAULT 'Pendente',
+                    data_pedido TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    data_entrega_prevista DATE,
+                    quantidade_total INTEGER,
+                    valor_total DECIMAL(10,2),
+                    observacoes TEXT
+                )
+            ''')
+            
+            # Tabela de itens do pedido
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS pedido_itens (
+                    id SERIAL PRIMARY KEY,
+                    pedido_id INTEGER REFERENCES pedidos(id) ON DELETE CASCADE,
+                    produto_id INTEGER REFERENCES produtos(id),
+                    quantidade INTEGER,
+                    preco_unitario DECIMAL(10,2),
+                    subtotal DECIMAL(10,2)
+                )
+            ''')
+            
+            # Inserir usuários padrão se não existirem
+            usuarios_padrao = [
+                ('admin', make_hashes('Admin@2024!'), 'Administrador', 'admin'),
+                ('vendedor', make_hashes('Vendas@123'), 'Vendedor', 'vendedor')
+            ]
+            
+            for username, password_hash, nome, tipo in usuarios_padrao:
+                cur.execute('''
+                    INSERT INTO usuarios (username, password_hash, nome_completo, tipo) 
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (username) DO NOTHING
+                ''', (username, password_hash, nome, tipo))
+            
+            # Inserir escolas padrão
+            escolas_padrao = ['Municipal', 'Desperta', 'São Tadeu']
+            for escola in escolas_padrao:
+                cur.execute('''
+                    INSERT INTO escolas (nome) VALUES (%s)
+                    ON CONFLICT (nome) DO NOTHING
+                ''', (escola,))
+            
+            conn.commit()
+            
+            # Atualizar estrutura do banco após criação inicial
+            atualizar_estrutura_banco()
+            
+        except Exception as e:
+            st.error(f"Erro ao inicializar banco: {str(e)}")
+        finally:
             conn.close()
 
-# =========================================
-# 🔐 SISTEMA DE LOGIN - RESPONSIVO
-# =========================================
+def get_connection():
+    """Estabelece conexão com o PostgreSQL"""
+    try:
+        # Para Render.com - usa DATABASE_URL do environment
+        database_url = os.environ.get('DATABASE_URL')
+        
+        if database_url:
+            # Converte postgres:// para postgresql://
+            if database_url.startswith('postgres://'):
+                database_url = database_url.replace('postgres://', 'postgresql://')
+            
+            conn = psycopg2.connect(database_url, sslmode='require')
+            return conn
+        else:
+            # Para desenvolvimento local
+            st.error("DATABASE_URL não configurada")
+            return None
+            
+    except Exception as e:
+        st.error(f"Erro de conexão com o banco: {str(e)}")
+        return None
 
-def check_login(username, password):
-    """Verifica as credenciais do usuário"""
+def verificar_login(username, password):
+    """Verifica credenciais no banco de dados"""
     conn = get_connection()
     if not conn:
-        return False, "Erro de conexão", None, None
+        return False, "Erro de conexão"
     
     try:
         cur = conn.cursor()
-        placeholder = get_placeholder()
+        cur.execute('''
+            SELECT password_hash, nome_completo, tipo 
+            FROM usuarios 
+            WHERE username = %s AND ativo = TRUE
+        ''', (username,))
         
-        query = f'SELECT id, password, nome, tipo FROM usuarios WHERE username = {placeholder}'
-        cur.execute(query, (username,))
-        result = cur.fetchone()
+        resultado = cur.fetchone()
         
-        if result:
-            user_id, stored_password, nome, tipo = result
-            if stored_password == password:
-                return True, nome, tipo, user_id
-        
-        return False, "Credenciais inválidas", None, None
+        if resultado and check_hashes(password, resultado[0]):
+            return True, resultado[1], resultado[2]  # sucesso, nome, tipo
+        else:
+            return False, "Credenciais inválidas", None
+            
     except Exception as e:
-        return False, f"Erro: {str(e)}", None, None
+        return False, f"Erro: {str(e)}", None
     finally:
-        if conn:
-            conn.close()
+        conn.close()
 
-def login_page():
-    """Página de login responsiva"""
-    st.markdown("<h1 class='main-header'>👕 FashionManager Pro</h1>", unsafe_allow_html=True)
+def alterar_senha(username, senha_atual, nova_senha):
+    """Altera a senha do usuário"""
+    conn = get_connection()
+    if not conn:
+        return False, "Erro de conexão"
     
-    # Layout responsivo para login
-    col1, col2, col3 = st.columns([1, 2, 1])
+    try:
+        cur = conn.cursor()
+        
+        # Verificar senha atual
+        cur.execute('SELECT password_hash FROM usuarios WHERE username = %s', (username,))
+        resultado = cur.fetchone()
+        
+        if not resultado or not check_hashes(senha_atual, resultado[0]):
+            return False, "Senha atual incorreta"
+        
+        # Atualizar senha
+        nova_senha_hash = make_hashes(nova_senha)
+        cur.execute(
+            'UPDATE usuarios SET password_hash = %s WHERE username = %s',
+            (nova_senha_hash, username)
+        )
+        conn.commit()
+        return True, "Senha alterada com sucesso!"
+        
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro: {str(e)}"
+    finally:
+        conn.close()
+
+def listar_usuarios():
+    """Lista todos os usuários (apenas para admin)"""
+    conn = get_connection()
+    if not conn:
+        return []
     
-    with col2:
-        st.info("🔐 **Faça login para continuar**")
+    try:
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT id, username, nome_completo, tipo, ativo, data_criacao 
+            FROM usuarios 
+            ORDER BY username
+        ''')
+        return cur.fetchall()
+    except Exception as e:
+        st.error(f"Erro ao listar usuários: {e}")
+        return []
+    finally:
+        conn.close()
+
+def criar_usuario(username, password, nome_completo, tipo):
+    """Cria novo usuário (apenas para admin)"""
+    conn = get_connection()
+    if not conn:
+        return False, "Erro de conexão"
+    
+    try:
+        cur = conn.cursor()
+        password_hash = make_hashes(password)
         
-        username = st.text_input("Usuário")
-        password = st.text_input("Senha", type='password')
+        cur.execute('''
+            INSERT INTO usuarios (username, password_hash, nome_completo, tipo)
+            VALUES (%s, %s, %s, %s)
+        ''', (username, password_hash, nome_completo, tipo))
         
-        if st.button("🚀 Entrar", use_container_width=True, key="login_btn"):
-            if username and password:
-                success, message, user_type, user_id = check_login(username, password)
-                if success:
-                    st.session_state.logged_in = True
-                    st.session_state.username = username
-                    st.session_state.user_name = message
-                    st.session_state.user_type = user_type
-                    st.session_state.user_id = user_id
-                    st.success(f"✅ Bem-vindo, {message}!")
-                    st.rerun()
-                else:
-                    st.error(f"❌ {message}")
+        conn.commit()
+        return True, "Usuário criado com sucesso!"
+        
+    except psycopg2.IntegrityError:
+        return False, "Username já existe"
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro: {str(e)}"
+    finally:
+        conn.close()
+
+# =========================================
+# 🔐 SISTEMA DE LOGIN
+# =========================================
+
+def login():
+    st.sidebar.title("🔐 Login")
+    username = st.sidebar.text_input("Usuário")
+    password = st.sidebar.text_input("Senha", type='password')
+    
+    if st.sidebar.button("Entrar"):
+        if username and password:
+            sucesso, mensagem, tipo_usuario = verificar_login(username, password)
+            if sucesso:
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.session_state.nome_usuario = mensagem
+                st.session_state.tipo_usuario = tipo_usuario
+                st.sidebar.success(f"Bem-vindo, {mensagem}!")
+                st.rerun()
             else:
-                st.error("⚠️ Preencha todos os campos")
-        
-        st.markdown("---")
-        with st.expander("👤 Usuários de teste"):
-            st.markdown("- **admin** / **admin123** (Administrador)")
-            st.markdown("- **vendedor** / **venda123** (Vendedor)")
-
-# =========================================
-# 📊 FUNÇÕES BÁSICAS DO SISTEMA
-# =========================================
-
-def adicionar_escola(nome, endereco, telefone, email):
-    """Adiciona uma nova escola"""
-    conn = get_connection()
-    if not conn:
-        return False, "Erro de conexão"
-    
-    try:
-        cur = conn.cursor()
-        placeholder = get_placeholder()
-        
-        query = f'INSERT INTO escolas (nome, endereco, telefone, email) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})'
-        cur.execute(query, (nome, endereco, telefone, email))
-        conn.commit()
-        return True, "✅ Escola cadastrada com sucesso!"
-    except Exception as e:
-        conn.rollback()
-        return False, f"❌ Erro: {str(e)}"
-    finally:
-        if conn:
-            conn.close()
-
-def listar_escolas():
-    """Lista todas as escolas"""
-    conn = get_connection()
-    if not conn:
-        return []
-    
-    try:
-        cur = conn.cursor()
-        cur.execute('SELECT * FROM escolas ORDER BY nome')
-        return cur.fetchall()
-    except Exception as e:
-        st.error(f"❌ Erro ao listar escolas: {e}")
-        return []
-    finally:
-        if conn:
-            conn.close()
-
-def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, escola_id):
-    """Adiciona um novo produto"""
-    conn = get_connection()
-    if not conn:
-        return False, "Erro de conexão"
-    
-    try:
-        cur = conn.cursor()
-        placeholder = get_placeholder()
-        
-        query = f'''
-            INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, escola_id) 
-            VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
-        '''
-        cur.execute(query, (nome, categoria, tamanho, cor, preco, estoque, escola_id))
-        conn.commit()
-        return True, "✅ Produto cadastrado com sucesso!"
-    except Exception as e:
-        conn.rollback()
-        return False, f"❌ Erro: {str(e)}"
-    finally:
-        if conn:
-            conn.close()
-
-def listar_produtos(escola_id=None):
-    """Lista produtos, opcionalmente filtrando por escola"""
-    conn = get_connection()
-    if not conn:
-        return []
-    
-    try:
-        cur = conn.cursor()
-        if escola_id:
-            placeholder = get_placeholder()
-            query = f'SELECT * FROM produtos WHERE escola_id = {placeholder} ORDER BY nome'
-            cur.execute(query, (escola_id,))
+                st.sidebar.error(mensagem)
         else:
-            cur.execute('SELECT * FROM produtos ORDER BY nome')
-        return cur.fetchall()
-    except Exception as e:
-        st.error(f"❌ Erro ao listar produtos: {e}")
-        return []
-    finally:
-        if conn:
-            conn.close()
+            st.sidebar.error("Preencha todos os campos")
 
-def adicionar_cliente(nome, telefone, email, escola_id):
-    """Adiciona um novo cliente"""
-    conn = get_connection()
-    if not conn:
-        return False, "Erro de conexão"
-    
-    try:
-        cur = conn.cursor()
-        placeholder = get_placeholder()
-        
-        query = f'INSERT INTO clientes (nome, telefone, email, escola_id) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})'
-        cur.execute(query, (nome, telefone, email, escola_id))
-        conn.commit()
-        return True, "✅ Cliente cadastrado com sucesso!"
-    except Exception as e:
-        conn.rollback()
-        return False, f"❌ Erro: {str(e)}"
-    finally:
-        if conn:
-            conn.close()
-
-def listar_clientes(escola_id=None):
-    """Lista clientes, opcionalmente filtrando por escola"""
-    conn = get_connection()
-    if not conn:
-        return []
-    
-    try:
-        cur = conn.cursor()
-        if escola_id:
-            placeholder = get_placeholder()
-            query = f'SELECT * FROM clientes WHERE escola_id = {placeholder} ORDER BY nome'
-            cur.execute(query, (escola_id,))
-        else:
-            cur.execute('SELECT * FROM clientes ORDER BY nome')
-        return cur.fetchall()
-    except Exception as e:
-        st.error(f"❌ Erro ao listar clientes: {e}")
-        return []
-    finally:
-        if conn:
-            conn.close()
-
-# =========================================
-# 🎯 INICIALIZAÇÃO DO SISTEMA
-# =========================================
-
-# Inicializar banco de dados
+# Inicializar banco na primeira execução
 if 'db_initialized' not in st.session_state:
-    if init_db():
-        st.session_state.db_initialized = True
-    else:
-        st.error("❌ Falha ao inicializar o banco de dados")
+    init_db()
+    st.session_state.db_initialized = True
 
-# Verificar login
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    login_page()
+    login()
     st.stop()
 
 # =========================================
-# 🎨 MENU PRINCIPAL - RESPONSIVO
+# 🚀 SISTEMA PRINCIPAL
 # =========================================
 
-# Sidebar colapsável para mobile
-with st.sidebar:
-    st.markdown(f"**{st.session_state.user_name}**")
-    st.markdown(f"**{st.session_state.user_type.upper()}**")
-    st.markdown("---")
-    
-    # Menu simplificado para mobile
-    menu_options = ["📊 Dashboard", "🏫 Escolas", "👕 Produtos", "👥 Clientes"]
-    
-    if st.session_state.user_type == 'admin':
-        menu_options.append("👥 Usuários")
-    
-    menu = st.radio("Navegação", menu_options)
-    
-    st.markdown("---")
-    
-    # Botões compactos para mobile
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔐 Senha", use_container_width=True, key="change_pwd_btn"):
-            st.session_state.alterar_senha = True
-    with col2:
-        if st.button("🚪 Sair", use_container_width=True, key="logout_btn"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+st.set_page_config(
+    page_title="Sistema de Fardamentos",
+    page_icon="👕",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# CONFIGURAÇÕES ESPECÍFICAS
+tamanhos_infantil = ["2", "4", "6", "8", "10", "12"]
+tamanhos_adulto = ["PP", "P", "M", "G", "GG"]
+todos_tamanhos = tamanhos_infantil + tamanhos_adulto
+
+tipos_camisetas = ["Camiseta Básica", "Camiseta Regata", "Camiseta Manga Longa"]
+tipos_calcas = ["Calça Jeans", "Calça Tactel", "Calça Moletom", "Bermuda", "Short", "Short Saia"]
+tipos_agasalhos = ["Blusão", "Moletom"]
 
 # =========================================
-# 📱 LAYOUT RESPONSIVO - DASHBOARD
+# 🔧 FUNÇÕES DO BANCO DE DADOS
+# =========================================
+
+# FUNÇÕES PARA CLIENTES
+def adicionar_cliente(nome, telefone, email):
+    conn = get_connection()
+    if not conn:
+        return False, "Erro de conexão"
+    
+    try:
+        cur = conn.cursor()
+        data_cadastro = datetime.now().strftime("%Y-%m-%d")
+        
+        cur.execute(
+            "INSERT INTO clientes (nome, telefone, email, data_cadastro) VALUES (%s, %s, %s, %s) RETURNING id",
+            (nome, telefone, email, data_cadastro)
+        )
+        
+        conn.commit()
+        return True, "Cliente cadastrado com sucesso!"
+        
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro: {str(e)}"
+    finally:
+        conn.close()
+
+def listar_clientes():
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT * FROM clientes ORDER BY nome
+        ''')
+        return cur.fetchall()
+    except Exception as e:
+        st.error(f"Erro ao listar clientes: {e}")
+        return []
+    finally:
+        conn.close()
+
+def excluir_cliente(cliente_id):
+    conn = get_connection()
+    if not conn:
+        return False, "Erro de conexão"
+    
+    try:
+        cur = conn.cursor()
+        
+        # Verificar se tem pedidos
+        cur.execute("SELECT COUNT(*) FROM pedidos WHERE cliente_id = %s", (cliente_id,))
+        if cur.fetchone()[0] > 0:
+            return False, "Cliente possui pedidos e não pode ser excluído"
+        
+        cur.execute("DELETE FROM clientes WHERE id = %s", (cliente_id,))
+        conn.commit()
+        return True, "Cliente excluído com sucesso"
+        
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro: {str(e)}"
+    finally:
+        conn.close()
+
+# FUNÇÕES PARA PRODUTOS
+def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id):
+    conn = get_connection()
+    if not conn:
+        return False, "Erro de conexão"
+    
+    try:
+        cur = conn.cursor()
+        
+        # Verificar se a coluna escola_id existe
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='produtos' and column_name='escola_id'
+        """)
+        tem_escola_id = cur.fetchone()
+        
+        if tem_escola_id:
+            cur.execute('''
+                INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id))
+        else:
+            cur.execute('''
+                INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, descricao)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', (nome, categoria, tamanho, cor, preco, estoque, descricao))
+        
+        conn.commit()
+        return True, "Produto cadastrado com sucesso!"
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro: {str(e)}"
+    finally:
+        conn.close()
+
+def listar_produtos():
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor()
+        
+        # Verificar se a coluna escola_id existe
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='produtos' and column_name='escola_id'
+        """)
+        tem_escola_id = cur.fetchone()
+        
+        if tem_escola_id:
+            cur.execute('''
+                SELECT p.*, e.nome as escola_nome 
+                FROM produtos p 
+                LEFT JOIN escolas e ON p.escola_id = e.id 
+                ORDER BY p.nome
+            ''')
+        else:
+            cur.execute('''
+                SELECT p.*, NULL as escola_nome 
+                FROM produtos p 
+                ORDER BY p.nome
+            ''')
+        return cur.fetchall()
+    except Exception as e:
+        st.error(f"Erro ao listar produtos: {e}")
+        return []
+    finally:
+        conn.close()
+
+def listar_produtos_por_escola(escola_id=None):
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor()
+        
+        # Verificar se a coluna escola_id existe
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='produtos' and column_name='escola_id'
+        """)
+        tem_escola_id = cur.fetchone()
+        
+        if tem_escola_id and escola_id:
+            cur.execute('''
+                SELECT p.*, e.nome as escola_nome 
+                FROM produtos p 
+                LEFT JOIN escolas e ON p.escola_id = e.id 
+                WHERE p.escola_id = %s
+                ORDER BY p.nome
+            ''', (escola_id,))
+        elif tem_escola_id:
+            cur.execute('''
+                SELECT p.*, e.nome as escola_nome 
+                FROM produtos p 
+                LEFT JOIN escolas e ON p.escola_id = e.id 
+                ORDER BY p.nome
+            ''')
+        else:
+            cur.execute('''
+                SELECT p.*, NULL as escola_nome 
+                FROM produtos p 
+                ORDER BY p.nome
+            ''')
+        return cur.fetchall()
+    except Exception as e:
+        st.error(f"Erro ao listar produtos: {e}")
+        return []
+    finally:
+        conn.close()
+
+def atualizar_estoque(produto_id, nova_quantidade):
+    conn = get_connection()
+    if not conn:
+        return False, "Erro de conexão"
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE produtos SET estoque = %s WHERE id = %s", (nova_quantidade, produto_id))
+        conn.commit()
+        return True, "Estoque atualizado com sucesso!"
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro: {str(e)}"
+    finally:
+        conn.close()
+
+# FUNÇÕES PARA ESCOLAS
+def listar_escolas():
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM escolas ORDER BY nome")
+        return cur.fetchall()
+    except Exception as e:
+        st.error(f"Erro ao listar escolas: {e}")
+        return []
+    finally:
+        conn.close()
+
+# FUNÇÕES PARA PEDIDOS
+def adicionar_pedido(cliente_id, itens, data_entrega, forma_pagamento, observacoes):
+    conn = get_connection()
+    if not conn:
+        return False, "Erro de conexão"
+    
+    try:
+        cur = conn.cursor()
+        data_pedido = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        quantidade_total = sum(item['quantidade'] for item in itens)
+        valor_total = sum(item['subtotal'] for item in itens)
+        
+        # Verificar se a coluna forma_pagamento existe
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='forma_pagamento'
+        """)
+        tem_forma_pagamento = cur.fetchone()
+        
+        if tem_forma_pagamento:
+            cur.execute('''
+                INSERT INTO pedidos (cliente_id, data_entrega_prevista, forma_pagamento, quantidade_total, valor_total, observacoes)
+                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+            ''', (cliente_id, data_entrega, forma_pagamento, quantidade_total, valor_total, observacoes))
+        else:
+            cur.execute('''
+                INSERT INTO pedidos (cliente_id, data_entrega_prevista, quantidade_total, valor_total, observacoes)
+                VALUES (%s, %s, %s, %s, %s) RETURNING id
+            ''', (cliente_id, data_entrega, quantidade_total, valor_total, observacoes))
+        
+        pedido_id = cur.fetchone()[0]
+        
+        for item in itens:
+            cur.execute('''
+                INSERT INTO pedido_itens (pedido_id, produto_id, quantidade, preco_unitario, subtotal)
+                VALUES (%s, %s, %s, %s, %s)
+            ''', (pedido_id, item['produto_id'], item['quantidade'], item['preco_unitario'], item['subtotal']))
+            
+            # Atualizar estoque
+            cur.execute("UPDATE produtos SET estoque = estoque - %s WHERE id = %s", 
+                       (item['quantidade'], item['produto_id']))
+        
+        conn.commit()
+        return True, pedido_id
+        
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro: {str(e)}"
+    finally:
+        conn.close()
+
+def listar_pedidos():
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor()
+        
+        # Verificar se as colunas novas existem
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='forma_pagamento'
+        """)
+        tem_forma_pagamento = cur.fetchone()
+        
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='data_entrega_real'
+        """)
+        tem_data_entrega_real = cur.fetchone()
+        
+        if tem_forma_pagamento and tem_data_entrega_real:
+            cur.execute('''
+                SELECT p.*, c.nome as cliente_nome
+                FROM pedidos p
+                JOIN clientes c ON p.cliente_id = c.id
+                ORDER BY p.data_pedido DESC
+            ''')
+        else:
+            cur.execute('''
+                SELECT p.*, c.nome as cliente_nome
+                FROM pedidos p
+                JOIN clientes c ON p.cliente_id = c.id
+                ORDER BY p.data_pedido DESC
+            ''')
+        return cur.fetchall()
+    except Exception as e:
+        st.error(f"Erro ao listar pedidos: {e}")
+        return []
+    finally:
+        conn.close()
+
+def atualizar_status_pedido(pedido_id, novo_status):
+    conn = get_connection()
+    if not conn:
+        return False, "Erro de conexão"
+    
+    try:
+        cur = conn.cursor()
+        
+        # Verificar se a coluna data_entrega_real existe
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='pedidos' and column_name='data_entrega_real'
+        """)
+        tem_data_entrega_real = cur.fetchone()
+        
+        if novo_status == 'Entregue' and tem_data_entrega_real:
+            data_entrega = datetime.now().strftime("%Y-%m-%d")
+            cur.execute('''
+                UPDATE pedidos 
+                SET status = %s, data_entrega_real = %s 
+                WHERE id = %s
+            ''', (novo_status, data_entrega, pedido_id))
+        else:
+            cur.execute('''
+                UPDATE pedidos 
+                SET status = %s 
+                WHERE id = %s
+            ''', (novo_status, pedido_id))
+        
+        conn.commit()
+        return True, "Status do pedido atualizado com sucesso!"
+        
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro: {str(e)}"
+    finally:
+        conn.close()
+
+def excluir_pedido(pedido_id):
+    conn = get_connection()
+    if not conn:
+        return False, "Erro de conexão"
+    
+    try:
+        cur = conn.cursor()
+        
+        # Restaurar estoque
+        cur.execute('SELECT produto_id, quantidade FROM pedido_itens WHERE pedido_id = %s', (pedido_id,))
+        itens = cur.fetchall()
+        
+        for produto_id, quantidade in itens:
+            cur.execute("UPDATE produtos SET estoque = estoque + %s WHERE id = %s", (quantidade, produto_id))
+        
+        # Excluir pedido (itens serão excluídos por CASCADE)
+        cur.execute("DELETE FROM pedidos WHERE id = %s", (pedido_id,))
+        
+        conn.commit()
+        return True, "Pedido excluído com sucesso"
+        
+    except Exception as e:
+        conn.rollback()
+        return False, f"Erro: {str(e)}"
+    finally:
+        conn.close()
+
+# =========================================
+# 📊 FUNÇÕES PARA RELATÓRIOS
+# =========================================
+
+def gerar_relatorio_vendas():
+    """Gera relatório de vendas por período"""
+    conn = get_connection()
+    if not conn:
+        return pd.DataFrame()
+    
+    try:
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT 
+                DATE(p.data_pedido) as data,
+                COUNT(*) as total_pedidos,
+                SUM(p.quantidade_total) as total_itens,
+                SUM(p.valor_total) as total_vendas
+            FROM pedidos p
+            GROUP BY DATE(p.data_pedido)
+            ORDER BY data DESC
+        ''')
+        dados = cur.fetchall()
+        
+        if dados:
+            df = pd.DataFrame(dados, columns=['Data', 'Total Pedidos', 'Total Itens', 'Total Vendas (R$)'])
+            return df
+        else:
+            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"Erro ao gerar relatório: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def gerar_relatorio_produtos():
+    """Gera relatório de produtos mais vendidos"""
+    conn = get_connection()
+    if not conn:
+        return pd.DataFrame()
+    
+    try:
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT 
+                pr.nome as produto,
+                pr.categoria,
+                pr.tamanho,
+                pr.cor,
+                SUM(pi.quantidade) as total_vendido,
+                SUM(pi.subtotal) as total_faturado
+            FROM pedido_itens pi
+            JOIN produtos pr ON pi.produto_id = pr.id
+            GROUP BY pr.id, pr.nome, pr.categoria, pr.tamanho, pr.cor
+            ORDER BY total_vendido DESC
+        ''')
+        dados = cur.fetchall()
+        
+        if dados:
+            df = pd.DataFrame(dados, columns=['Produto', 'Categoria', 'Tamanho', 'Cor', 'Total Vendido', 'Total Faturado (R$)'])
+            return df
+        else:
+            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"Erro ao gerar relatório: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def gerar_relatorio_clientes():
+    """Gera relatório de clientes que mais compram"""
+    conn = get_connection()
+    if not conn:
+        return pd.DataFrame()
+    
+    try:
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT 
+                c.nome as cliente,
+                COUNT(p.id) as total_pedidos,
+                SUM(p.quantidade_total) as total_itens,
+                SUM(p.valor_total) as total_gasto
+            FROM clientes c
+            LEFT JOIN pedidos p ON c.id = p.cliente_id
+            WHERE p.id IS NOT NULL
+            GROUP BY c.id, c.nome
+            ORDER BY total_gasto DESC
+        ''')
+        dados = cur.fetchall()
+        
+        if dados:
+            df = pd.DataFrame(dados, columns=['Cliente', 'Total Pedidos', 'Total Itens', 'Total Gasto (R$)'])
+            return df
+        else:
+            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"Erro ao gerar relatório: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+# =========================================
+# 🎨 INTERFACE PRINCIPAL
+# =========================================
+
+# Sidebar - Informações do usuário
+st.sidebar.markdown("---")
+st.sidebar.write(f"👤 **Usuário:** {st.session_state.nome_usuario}")
+st.sidebar.write(f"🎯 **Tipo:** {st.session_state.tipo_usuario}")
+
+# Menu de gerenciamento de usuários (apenas para admin)
+if st.session_state.tipo_usuario == 'admin':
+    with st.sidebar.expander("👥 Gerenciar Usuários"):
+        st.subheader("Novo Usuário")
+        with st.form("novo_usuario"):
+            novo_username = st.text_input("Username")
+            nova_senha = st.text_input("Senha", type='password')
+            nome_completo = st.text_input("Nome Completo")
+            tipo = st.selectbox("Tipo", ["admin", "vendedor"])
+            
+            if st.form_submit_button("Criar Usuário"):
+                if novo_username and nova_senha and nome_completo:
+                    sucesso, msg = criar_usuario(novo_username, nova_senha, nome_completo, tipo)
+                    if sucesso:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+        
+        st.subheader("Usuários do Sistema")
+        usuarios = listar_usuarios()
+        if usuarios:
+            for usuario in usuarios:
+                status = "✅ Ativo" if usuario[4] else "❌ Inativo"
+                st.write(f"**{usuario[1]}** - {usuario[2]} ({usuario[3]}) - {status}")
+
+# Menu de alteração de senha
+with st.sidebar.expander("🔐 Alterar Senha"):
+    with st.form("alterar_senha"):
+        senha_atual = st.text_input("Senha Atual", type='password')
+        nova_senha1 = st.text_input("Nova Senha", type='password')
+        nova_senha2 = st.text_input("Confirmar Nova Senha", type='password')
+        
+        if st.form_submit_button("Alterar Senha"):
+            if senha_atual and nova_senha1 and nova_senha2:
+                if nova_senha1 == nova_senha2:
+                    sucesso, msg = alterar_senha(st.session_state.username, senha_atual, nova_senha1)
+                    if sucesso:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+                else:
+                    st.error("As novas senhas não coincidem")
+            else:
+                st.error("Preencha todos os campos")
+
+# Botão de logout
+st.sidebar.markdown("---")
+if st.sidebar.button("🚪 Sair"):
+    st.session_state.logged_in = False
+    st.session_state.username = None
+    st.session_state.nome_usuario = None
+    st.session_state.tipo_usuario = None
+    st.rerun()
+
+# Menu principal
+st.sidebar.title("👕 Sistema de Fardamentos")
+menu_options = ["📊 Dashboard", "📦 Pedidos", "👥 Clientes", "👕 Produtos", "📦 Estoque", "📈 Relatórios"]
+menu = st.sidebar.radio("Navegação", menu_options)
+
+# Header dinâmico
+if menu == "📊 Dashboard":
+    st.title("📊 Dashboard - Visão Geral")
+elif menu == "📦 Pedidos":
+    st.title("📦 Gestão de Pedidos") 
+elif menu == "👥 Clientes":
+    st.title("👥 Gestão de Clientes")
+elif menu == "👕 Produtos":
+    st.title("👕 Gestão de Produtos")
+elif menu == "📦 Estoque":
+    st.title("📦 Controle de Estoque")
+elif menu == "📈 Relatórios":
+    st.title("📈 Relatórios Detalhados")
+
+st.markdown("---")
+
+# =========================================
+# 📱 PÁGINAS DO SISTEMA
 # =========================================
 
 if menu == "📊 Dashboard":
-    st.markdown("<h1 class='main-header'>📊 Dashboard</h1>", unsafe_allow_html=True)
+    st.header("🎯 Métricas em Tempo Real")
     
-    # Métricas gerais - layout responsivo
-    st.subheader("Visão Geral")
+    # Carregar dados
+    pedidos = listar_pedidos()
+    clientes = listar_clientes()
+    produtos = listar_produtos()
     
-    # Em mobile, mostrar métricas em coluna única
-    metrics_cols = st.columns(2)  # 2 colunas em mobile
+    col1, col2, col3, col4 = st.columns(4)
     
-    with metrics_cols[0]:
-        escolas_count = len(listar_escolas())
-        st.metric("🏫 Escolas", escolas_count)
+    with col1:
+        st.metric("Total de Pedidos", len(pedidos))
     
-    with metrics_cols[1]:
-        clientes_count = len(listar_clientes())
-        st.metric("👥 Clientes", clientes_count)
+    with col2:
+        pedidos_pendentes = len([p for p in pedidos if p[2] == 'Pendente'])
+        st.metric("Pedidos Pendentes", pedidos_pendentes)
     
-    metrics_cols2 = st.columns(2)
+    with col3:
+        st.metric("Clientes Ativos", len(clientes))
     
-    with metrics_cols2[0]:
-        produtos_count = len(listar_produtos())
-        st.metric("👕 Produtos", produtos_count)
+    with col4:
+        produtos_baixo_estoque = len([p for p in produtos if p[6] < 5])
+        st.metric("Alertas de Estoque", produtos_baixo_estoque, delta=-produtos_baixo_estoque)
     
-    with metrics_cols2[1]:
-        st.metric("📦 Pedidos", "0")
+    # Ações Rápidas - CORRIGIDO
+    st.header("⚡ Ações Rápidas")
+    col1, col2, col3 = st.columns(3)
     
-    # Ações rápidas - botões empilhados em mobile
-    st.subheader("Ações Rápidas")
-    
-    # Usar colunas com breakpoints responsivos
-    action_cols = st.columns(2)
-    
-    with action_cols[0]:
-        if st.button("➕ Nova Escola", use_container_width=True, key="btn_escola"):
-            st.session_state.menu = "🏫 Escolas"
-            st.rerun()
-        
-        if st.button("👕 Novo Produto", use_container_width=True, key="btn_produto"):
-            st.session_state.menu = "👕 Produtos"
-            st.rerun()
-    
-    with action_cols[1]:
-        if st.button("👥 Novo Cliente", use_container_width=True, key="btn_cliente"):
-            st.session_state.menu = "👥 Clientes"
-            st.rerun()
-        
-        if st.button("📦 Novo Pedido", use_container_width=True, key="btn_pedido"):
+    with col1:
+        if st.button("📝 Novo Pedido", use_container_width=True):
+            # Usando session_state para navegação
             st.session_state.menu = "📦 Pedidos"
             st.rerun()
-
-# =========================================
-# 🏫 GESTÃO DE ESCOLAS - RESPONSIVA
-# =========================================
-
-elif menu == "🏫 Escolas":
-    st.markdown("<h1 class='main-header'>🏫 Escolas</h1>", unsafe_allow_html=True)
     
-    # Tabs responsivas
-    tab1, tab2 = st.tabs(["📋 Lista", "➕ Nova Escola"])
+    with col2:
+        if st.button("👥 Cadastrar Cliente", use_container_width=True):
+            st.session_state.menu = "👥 Clientes"
+            st.rerun()
+    
+    with col3:
+        if st.button("👕 Cadastrar Produto", use_container_width=True):
+            st.session_state.menu = "👕 Produtos"
+            st.rerun()
+
+elif menu == "👥 Clientes":
+    tab1, tab2, tab3 = st.tabs(["➕ Cadastrar Cliente", "📋 Listar Clientes", "🗑️ Excluir Cliente"])
     
     with tab1:
-        st.subheader("Escolas Cadastradas")
-        escolas = listar_escolas()
+        st.header("➕ Novo Cliente")
         
-        if escolas:
-            for escola in escolas:
-                # Cartão responsivo para cada escola
-                with st.container():
-                    col1, col2 = st.columns([3, 1])
-                    
-                    with col1:
-                        st.markdown(f"**{escola[1]}**")
-                        if escola[2]:
-                            st.caption(f"📍 {escola[2]}")
-                        if escola[3]:
-                            st.caption(f"📞 {escola[3]}")
-                        st.caption(f"📅 {formatar_data_brasil(escola[5])}")
-                    
-                    with col2:
-                        produtos_count = len(listar_produtos(escola[0]))
-                        st.metric("Produtos", produtos_count, label_visibility="collapsed")
-                    
-                    st.markdown("---")
-        else:
-            st.info("📝 Nenhuma escola cadastrada")
+        nome = st.text_input("👤 Nome completo*")
+        telefone = st.text_input("📞 Telefone")
+        email = st.text_input("📧 Email")
+        
+        if st.button("✅ Cadastrar Cliente", type="primary"):
+            if nome:
+                sucesso, msg = adicionar_cliente(nome, telefone, email)
+                if sucesso:
+                    st.success(msg)
+                    st.balloons()
+                else:
+                    st.error(msg)
+            else:
+                st.error("❌ Nome é obrigatório!")
     
     with tab2:
-        st.subheader("Cadastrar Nova Escola")
-        with st.form("nova_escola"):
-            nome = st.text_input("Nome da Escola*")
-            endereco = st.text_input("Endereço")
-            telefone = st.text_input("Telefone")
-            email = st.text_input("Email")
+        st.header("📋 Clientes Cadastrados")
+        clientes = listar_clientes()
+        
+        if clientes:
+            dados = []
+            for cliente in clientes:
+                dados.append({
+                    'ID': cliente[0],
+                    'Nome': cliente[1],
+                    'Telefone': cliente[2] or 'N/A',
+                    'Email': cliente[3] or 'N/A',
+                    'Data Cadastro': cliente[4]
+                })
             
-            if st.form_submit_button("✅ Cadastrar Escola", use_container_width=True):
-                if nome:
-                    success, msg = adicionar_escola(nome, endereco, telefone, email)
-                    if success:
+            st.dataframe(pd.DataFrame(dados), use_container_width=True)
+        else:
+            st.info("👥 Nenhum cliente cadastrado")
+    
+    with tab3:
+        st.header("🗑️ Excluir Cliente")
+        clientes = listar_clientes()
+        
+        if clientes:
+            cliente_selecionado = st.selectbox(
+                "Selecione o cliente para excluir:",
+                [f"{c[1]} (ID: {c[0]})" for c in clientes]
+            )
+            
+            if cliente_selecionado:
+                cliente_id = int(cliente_selecionado.split("(ID: ")[1].replace(")", ""))
+                
+                st.warning("⚠️ Esta ação não pode ser desfeita!")
+                if st.button("🗑️ Confirmar Exclusão", type="primary"):
+                    sucesso, msg = excluir_cliente(cliente_id)
+                    if sucesso:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        else:
+            st.info("👥 Nenhum cliente cadastrado")
+
+elif menu == "👕 Produtos":
+    tab1, tab2 = st.tabs(["➕ Cadastrar Produto", "📋 Listar Produtos"])
+    
+    with tab1:
+        st.header("➕ Cadastrar Produto")
+        
+        nome = st.text_input("Nome do produto*")
+        categoria = st.selectbox("Categoria", ["Camisetas", "Calças/Shorts", "Agasalhos"])
+        tamanho = st.selectbox("Tamanho", todos_tamanhos)
+        cor = st.text_input("Cor", value="Branco")
+        preco = st.number_input("Preço (R$)", min_value=0.0, value=29.90)
+        estoque = st.number_input("Estoque inicial", min_value=0, value=10)
+        descricao = st.text_area("Descrição")
+        
+        # Seleção de escola para o produto
+        escolas_db = listar_escolas()
+        escola_selecionada = st.selectbox(
+            "🏫 Escola do produto*",
+            [e[1] for e in escolas_db],
+            help="Selecione a escola para a qual este produto é destinado"
+        )
+        
+        if st.button("✅ Cadastrar Produto", type="primary"):
+            if nome and escola_selecionada:
+                escola_id = next(e[0] for e in escolas_db if e[1] == escola_selecionada)
+                sucesso, msg = adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id)
+                if sucesso:
+                    st.success(msg)
+                    st.balloons()
+                else:
+                    st.error(msg)
+            else:
+                st.error("❌ Nome do produto e escola são obrigatórios!")
+    
+    with tab2:
+        st.header("📋 Produtos Cadastrados")
+        
+        # Filtro por escola
+        escolas_db = listar_escolas()
+        escola_filtro = st.selectbox(
+            "Filtrar por escola:",
+            ["Todas as escolas"] + [e[1] for e in escolas_db]
+        )
+        
+        if escola_filtro == "Todas as escolas":
+            produtos = listar_produtos()
+        else:
+            escola_id = next(e[0] for e in escolas_db if e[1] == escola_filtro)
+            produtos = listar_produtos_por_escola(escola_id)
+        
+        if produtos:
+            dados = []
+            for produto in produtos:
+                dados.append({
+                    'ID': produto[0],
+                    'Nome': produto[1],
+                    'Categoria': produto[2],
+                    'Tamanho': produto[3],
+                    'Cor': produto[4],
+                    'Preço': f"R$ {produto[5]:.2f}",
+                    'Estoque': produto[6],
+                    'Descrição': produto[7] or 'N/A',
+                    'Escola': produto[9] or 'N/A'
+                })
+            
+            st.dataframe(pd.DataFrame(dados), use_container_width=True)
+        else:
+            st.info("👕 Nenhum produto cadastrado")
+
+elif menu == "📦 Estoque":
+    st.header("📊 Ajuste de Estoque")
+    
+    # Filtro por escola
+    escolas_db = listar_escolas()
+    escola_filtro = st.selectbox(
+        "Filtrar por escola:",
+        ["Todas as escolas"] + [e[1] for e in escolas_db]
+    )
+    
+    if escola_filtro == "Todas as escolas":
+        produtos = listar_produtos()
+    else:
+        escola_id = next(e[0] for e in escolas_db if e[1] == escola_filtro)
+        produtos = listar_produtos_por_escola(escola_id)
+    
+    if produtos:
+        produto_selecionado = st.selectbox(
+            "Selecione o produto:",
+            [f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Escola: {p[9]} - Estoque: {p[6]}" for p in produtos]
+        )
+        
+        if produto_selecionado:
+            produto_id = next(p[0] for p in produtos if f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Escola: {p[9]} - Estoque: {p[6]}" == produto_selecionado)
+            produto = next(p for p in produtos if p[0] == produto_id)
+            
+            st.write(f"**Produto selecionado:** {produto[1]}")
+            st.write(f"**Escola:** {produto[9]}")
+            st.write(f"**Estoque atual:** {produto[6]} unidades")
+            
+            nova_quantidade = st.number_input("Nova quantidade em estoque", min_value=0, value=produto[6])
+            
+            if st.button("💾 Atualizar Estoque", type="primary"):
+                if nova_quantidade != produto[6]:
+                    sucesso, msg = atualizar_estoque(produto_id, nova_quantidade)
+                    if sucesso:
                         st.success(msg)
                         st.rerun()
                     else:
                         st.error(msg)
                 else:
-                    st.error("❌ Nome é obrigatório!")
+                    st.info("Quantidade não foi alterada")
+    else:
+        st.info("👕 Nenhum produto cadastrado")
 
-# =========================================
-# 👕 GESTÃO DE PRODUTOS - RESPONSIVA
-# =========================================
-
-elif menu == "👕 Produtos":
-    st.markdown("<h1 class='main-header'>👕 Produtos</h1>", unsafe_allow_html=True)
-    
-    tab1, tab2 = st.tabs(["📋 Lista", "➕ Novo Produto"])
+elif menu == "📦 Pedidos":
+    tab1, tab2, tab3, tab4 = st.tabs(["➕ Novo Pedido", "📋 Listar Pedidos", "🔄 Atualizar Status", "🗑️ Excluir Pedido"])
     
     with tab1:
-        st.subheader("Produtos Cadastrados")
+        st.header("➕ Novo Pedido")
         
-        # Filtros em coluna única para mobile
-        escolas = listar_escolas()
-        escola_options = {0: "Todas as escolas"}
-        for escola in escolas:
-            escola_options[escola[0]] = escola[1]
-        
-        escola_id = st.selectbox("Filtrar por escola", options=list(escola_options.keys()), 
-                               format_func=lambda x: escola_options[x])
-        
-        produtos = listar_produtos(escola_id if escola_id != 0 else None)
-        
-        if produtos:
-            for produto in produtos:
-                with st.container():
-                    # Layout compacto para mobile
-                    col1, col2 = st.columns([3, 1])
-                    
-                    with col1:
-                        st.markdown(f"**{produto[1]}**")
-                        escola_nome = next((escola[1] for escola in escolas if escola[0] == produto[7]), "N/A")
-                        st.caption(f"🏫 {escola_nome} | 📁 {produto[2]} | 📏 {produto[3]}")
-                        st.caption(f"🎨 {produto[4]} | 💵 R$ {float(produto[5]):.2f}")
-                    
-                    with col2:
-                        estoque = produto[6] if produto[6] else 0
-                        status = "✅" if estoque >= 10 else "⚠️" if estoque > 0 else "❌"
-                        st.metric("Estoque", f"{status} {estoque}", label_visibility="collapsed")
-                    
-                    st.markdown("---")
-        else:
-            st.info("📝 Nenhum produto cadastrado")
-    
-    with tab2:
-        st.subheader("Cadastrar Novo Produto")
-        escolas = listar_escolas()
-        
-        if not escolas:
-            st.error("❌ Cadastre uma escola primeiro")
-        else:
-            with st.form("novo_produto"):
-                # Formulário em coluna única para mobile
-                nome = st.text_input("Nome do Produto*")
-                categoria = st.selectbox("Categoria*", ["Camisetas", "Calças", "Agasalhos", "Acessórios"])
-                tamanho = st.selectbox("Tamanho*", ["P", "M", "G", "GG", "Único"])
-                cor = st.text_input("Cor*", "Branco")
-                preco = st.number_input("Preço R$*", min_value=0.0, value=29.90)
-                estoque = st.number_input("Estoque*", min_value=0, value=10)
-                escola_id = st.selectbox("Escola*", options=[e[0] for e in escolas], 
-                                       format_func=lambda x: next((e[1] for e in escolas if e[0] == x), "N/A"))
-                
-                if st.form_submit_button("✅ Cadastrar Produto", use_container_width=True):
-                    if nome and cor and escola_id:
-                        success, msg = adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, escola_id)
-                        if success:
-                            st.success(msg)
-                            st.rerun()
-                        else:
-                            st.error(msg)
-                    else:
-                        st.error("❌ Campos obrigatórios!")
-
-# =========================================
-# 👥 GESTÃO DE CLIENTES - RESPONSIVA
-# =========================================
-
-elif menu == "👥 Clientes":
-    st.markdown("<h1 class='main-header'>👥 Clientes</h1>", unsafe_allow_html=True)
-    
-    tab1, tab2 = st.tabs(["📋 Lista", "➕ Novo Cliente"])
-    
-    with tab1:
-        st.subheader("Clientes Cadastrados")
-        
-        escolas = listar_escolas()
-        escola_options = {0: "Todas as escolas"}
-        for escola in escolas:
-            escola_options[escola[0]] = escola[1]
-        
-        escola_id = st.selectbox("Filtrar por escola", options=list(escola_options.keys()), 
-                               format_func=lambda x: escola_options[x])
-        
-        clientes = listar_clientes(escola_id if escola_id != 0 else None)
-        
+        # Selecionar cliente
+        clientes = listar_clientes()
         if clientes:
-            for cliente in clientes:
-                with st.container():
-                    col1, col2 = st.columns([3, 1])
+            cliente_selecionado = st.selectbox(
+                "Selecione o cliente:",
+                [f"{c[1]} (ID: {c[0]})" for c in clientes]
+            )
+            
+            if cliente_selecionado:
+                cliente_id = int(cliente_selecionado.split("(ID: ")[1].replace(")", ""))
+                
+                # Filtro de produtos por escola
+                escolas_db = listar_escolas()
+                escola_filtro = st.selectbox(
+                    "🏫 Filtrar produtos por escola:",
+                    ["Todas as escolas"] + [e[1] for e in escolas_db]
+                )
+                
+                if escola_filtro == "Todas as escolas":
+                    produtos = listar_produtos()
+                else:
+                    escola_id = next(e[0] for e in escolas_db if e[1] == escola_filtro)
+                    produtos = listar_produtos_por_escola(escola_id)
+                
+                if produtos:
+                    st.subheader("🛒 Itens do Pedido")
                     
+                    # Interface para adicionar itens
+                    col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.markdown(f"**{cliente[1]}**")
-                        if cliente[2]:
-                            st.caption(f"📞 {cliente[2]}")
-                        if cliente[3]:
-                            st.caption(f"📧 {cliente[3]}")
-                        escola_nome = next((escola[1] for escola in escolas if escola[0] == cliente[4]), "N/A")
-                        st.caption(f"🏫 {escola_nome}")
-                        st.caption(f"📅 {formatar_data_brasil(cliente[5])}")
-                    
+                        produto_selecionado = st.selectbox(
+                            "Produto:",
+                            [f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Escola: {p[9]} - Estoque: {p[6]} - R$ {p[5]:.2f}" for p in produtos]
+                        )
                     with col2:
-                        st.metric("Pedidos", "0", label_visibility="collapsed")
+                        quantidade = st.number_input("Quantidade", min_value=1, value=1)
+                    with col3:
+                        if st.button("➕ Adicionar Item"):
+                            if 'itens_pedido' not in st.session_state:
+                                st.session_state.itens_pedido = []
+                            
+                            produto_id = next(p[0] for p in produtos if f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Escola: {p[9]} - Estoque: {p[6]} - R$ {p[5]:.2f}" == produto_selecionado)
+                            produto = next(p for p in produtos if p[0] == produto_id)
+                            
+                            if quantidade > produto[6]:
+                                st.error("❌ Quantidade indisponível em estoque!")
+                            else:
+                                item = {
+                                    'produto_id': produto_id,
+                                    'nome': produto[1],
+                                    'escola': produto[9],
+                                    'quantidade': quantidade,
+                                    'preco_unitario': float(produto[5]),
+                                    'subtotal': float(produto[5]) * quantidade
+                                }
+                                st.session_state.itens_pedido.append(item)
+                                st.success("✅ Item adicionado!")
+                                st.rerun()
                     
-                    st.markdown("---")
+                    # Mostrar itens adicionados
+                    if 'itens_pedido' in st.session_state and st.session_state.itens_pedido:
+                        st.subheader("📋 Itens do Pedido")
+                        total_pedido = sum(item['subtotal'] for item in st.session_state.itens_pedido)
+                        
+                        for i, item in enumerate(st.session_state.itens_pedido):
+                            col1, col2, col3, col4, col5 = st.columns([3,1,1,1,1])
+                            with col1:
+                                st.write(f"**{item['nome']}**")
+                                st.write(f"Escola: {item['escola']}")
+                            with col2:
+                                st.write(f"Qtd: {item['quantidade']}")
+                            with col3:
+                                st.write(f"R$ {item['preco_unitario']:.2f}")
+                            with col4:
+                                st.write(f"R$ {item['subtotal']:.2f}")
+                            with col5:
+                                if st.button("❌", key=f"del_{i}"):
+                                    st.session_state.itens_pedido.pop(i)
+                                    st.rerun()
+                        
+                        st.write(f"**Total do Pedido: R$ {total_pedido:.2f}**")
+                        
+                        # Data de entrega, forma de pagamento e observações
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            data_entrega = st.date_input("📅 Data de Entrega Prevista", min_value=date.today())
+                            forma_pagamento = st.selectbox(
+                                "💳 Forma de Pagamento",
+                                ["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Transferência"]
+                            )
+                        with col2:
+                            observacoes = st.text_area("Observações")
+                        
+                        if st.button("✅ Finalizar Pedido", type="primary"):
+                            if st.session_state.itens_pedido:
+                                sucesso, resultado = adicionar_pedido(
+                                    cliente_id, 
+                                    st.session_state.itens_pedido, 
+                                    data_entrega, 
+                                    forma_pagamento,
+                                    observacoes
+                                )
+                                if sucesso:
+                                    st.success(f"✅ Pedido #{resultado} criado com sucesso!")
+                                    st.balloons()
+                                    del st.session_state.itens_pedido
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Erro ao criar pedido: {resultado}")
+                            else:
+                                st.error("❌ Adicione pelo menos um item ao pedido!")
+                    else:
+                        st.info("🛒 Adicione itens ao pedido usando o botão acima")
+                else:
+                    st.error("❌ Nenhum produto cadastrado. Cadastre produtos primeiro.")
         else:
-            st.info("📝 Nenhum cliente cadastrado")
+            st.error("❌ Nenhum cliente cadastrado. Cadastre clientes primeiro.")
     
     with tab2:
-        st.subheader("Cadastrar Novo Cliente")
-        escolas = listar_escolas()
+        st.header("📋 Pedidos Realizados")
+        pedidos = listar_pedidos()
         
-        if not escolas:
-            st.error("❌ Cadastre uma escola primeiro")
-        else:
-            with st.form("novo_cliente"):
-                nome = st.text_input("Nome completo*")
-                telefone = st.text_input("Telefone")
-                email = st.text_input("Email")
-                escola_id = st.selectbox("Escola*", options=[e[0] for e in escolas], 
-                                       format_func=lambda x: next((e[1] for e in escolas if e[0] == x), "N/A"))
+        if pedidos:
+            dados = []
+            for pedido in pedidos:
+                status_info = {
+                    'Pendente': '🟡 Pendente',
+                    'Em produção': '🟠 Em produção', 
+                    'Pronto para entrega': '🔵 Pronto para entrega',
+                    'Entregue': '🟢 Entregue',
+                    'Cancelado': '🔴 Cancelado'
+                }.get(pedido[2], f'⚪ {pedido[2]}')
                 
-                if st.form_submit_button("✅ Cadastrar Cliente", use_container_width=True):
-                    if nome and escola_id:
-                        success, msg = adicionar_cliente(nome, telefone, email, escola_id)
-                        if success:
-                            st.success(msg)
-                            st.rerun()
-                        else:
-                            st.error(msg)
-                    else:
-                        st.error("❌ Nome e escola são obrigatórios!")
-
-# =========================================
-# 👥 GERENCIAMENTO DE USUÁRIOS (APENAS ADMIN)
-# =========================================
-
-elif menu == "👥 Usuários" and st.session_state.user_type == 'admin':
-    st.markdown("<h1 class='main-header'>👥 Usuários</h1>", unsafe_allow_html=True)
+                # Verificar se tem forma_pagamento (índice 3) e data_entrega_real (índice 6)
+                forma_pagamento = pedido[3] if len(pedido) > 3 and pedido[3] else 'Dinheiro'
+                data_entrega_real = pedido[6] if len(pedido) > 6 and pedido[6] else 'Não entregue'
+                
+                # CORREÇÃO: Converter valor_total para float antes de formatar
+                valor_total = pedido[8]
+                if isinstance(valor_total, str):
+                    try:
+                        valor_total = float(valor_total)
+                    except (ValueError, TypeError):
+                        valor_total = 0.0
+                
+                dados.append({
+                    'ID': pedido[0],
+                    'Cliente': pedido[9] if len(pedido) > 9 else 'N/A',
+                    'Status': status_info,
+                    'Forma Pagamento': forma_pagamento,
+                    'Data Pedido': pedido[4],
+                    'Entrega Prevista': pedido[5],
+                    'Entrega Real': data_entrega_real,
+                    'Quantidade': pedido[7],
+                    'Valor Total': f"R$ {valor_total:.2f}",
+                    'Observações': pedido[10] if len(pedido) > 10 and pedido[10] else 'Nenhuma'
+                })
+            
+            st.dataframe(pd.DataFrame(dados), use_container_width=True)
+        else:
+            st.info("📦 Nenhum pedido realizado")
     
-    st.info("🔧 Funcionalidade em desenvolvimento...")
-    st.write("Em breve você poderá gerenciar usuários aqui!")
-
-# =========================================
-# 🔐 ALTERAÇÃO DE SENHA (MODAL RESPONSIVO)
-# =========================================
-
-if st.session_state.get('alterar_senha'):
-    # Overlay responsivo
-    st.markdown(
-        """
-        <style>
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0,0,0,0.5);
-            z-index: 999;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    with st.container():
-        st.markdown("<h3>🔐 Alterar Senha</h3>", unsafe_allow_html=True)
+    with tab3:
+        st.header("🔄 Atualizar Status do Pedido")
+        pedidos = listar_pedidos()
         
-        nova_senha = st.text_input("Nova Senha", type="password", key="nova_senha_input")
-        confirmar_senha = st.text_input("Confirmar Nova Senha", type="password", key="confirmar_senha_input")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("✅ Salvar", use_container_width=True):
-                if nova_senha and confirmar_senha:
-                    if nova_senha == confirmar_senha:
-                        # Simular alteração de senha
-                        st.success("✅ Senha alterada com sucesso!")
-                        st.session_state.alterar_senha = False
+        if pedidos:
+            pedido_selecionado = st.selectbox(
+                "Selecione o pedido:",
+                [f"Pedido #{p[0]} - {p[9] if len(p) > 9 else 'N/A'} - Status: {p[2]}" for p in pedidos]
+            )
+            
+            if pedido_selecionado:
+                pedido_id = int(pedido_selecionado.split("#")[1].split(" -")[0])
+                pedido = next(p for p in pedidos if p[0] == pedido_id)
+                
+                st.write(f"**Cliente:** {pedido[9] if len(pedido) > 9 else 'N/A'}")
+                st.write(f"**Status atual:** {pedido[2]}")
+                
+                # CORREÇÃO: Converter valor_total para float antes de exibir
+                valor_total = pedido[8]
+                if isinstance(valor_total, str):
+                    try:
+                        valor_total = float(valor_total)
+                    except (ValueError, TypeError):
+                        valor_total = 0.0
+                
+                st.write(f"**Valor Total:** R$ {valor_total:.2f}")
+                
+                novo_status = st.selectbox(
+                    "Novo status:",
+                    ["Pendente", "Em produção", "Pronto para entrega", "Entregue", "Cancelado"]
+                )
+                
+                if st.button("🔄 Atualizar Status", type="primary"):
+                    sucesso, msg = atualizar_status_pedido(pedido_id, novo_status)
+                    if sucesso:
+                        st.success(msg)
                         st.rerun()
                     else:
-                        st.error("❌ As senhas não coincidem!")
-                else:
-                    st.error("❌ Preencha todos os campos!")
+                        st.error(msg)
+        else:
+            st.info("📦 Nenhum pedido para atualizar")
+    
+    with tab4:
+        st.header("🗑️ Excluir Pedido")
+        pedidos = listar_pedidos()
         
-        with col2:
-            if st.button("❌ Cancelar", use_container_width=True):
-                st.session_state.alterar_senha = False
-                st.rerun()
+        if pedidos:
+            pedido_selecionado = st.selectbox(
+                "Selecione o pedido para excluir:",
+                [f"Pedido #{p[0]} - {p[9] if len(p) > 9 else 'N/A'} - R$ {float(p[8]):.2f}" for p in pedidos]
+            )
+            
+            if pedido_selecionado:
+                pedido_id = int(pedido_selecionado.split("#")[1].split(" -")[0])
+                
+                st.warning("⚠️ Esta ação não pode ser desfeita e restaurará o estoque!")
+                if st.button("🗑️ Confirmar Exclusão", type="primary"):
+                    sucesso, msg = excluir_pedido(pedido_id)
+                    if sucesso:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        else:
+            st.info("📦 Nenhum pedido para excluir")
 
-# =========================================
-# 🎯 RODAPÉ RESPONSIVO
-# =========================================
+elif menu == "📈 Relatórios":
+    tab1, tab2, tab3 = st.tabs(["📊 Vendas por Período", "📦 Produtos Mais Vendidos", "👥 Clientes Mais Ativos"])
+    
+    with tab1:
+        st.header("📊 Relatório de Vendas por Período")
+        relatorio_vendas = gerar_relatorio_vendas()
+        
+        if not relatorio_vendas.empty:
+            st.dataframe(relatorio_vendas, use_container_width=True)
+            
+            # Gráfico de vendas
+            fig = px.line(relatorio_vendas, x='Data', y='Total Vendas (R$)', 
+                         title='Evolução das Vendas por Dia')
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Métricas resumidas
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Período", f"R$ {relatorio_vendas['Total Vendas (R$)'].sum():.2f}")
+            with col2:
+                st.metric("Média Diária", f"R$ {relatorio_vendas['Total Vendas (R$)'].mean():.2f}")
+            with col3:
+                st.metric("Maior Venda", f"R$ {relatorio_vendas['Total Vendas (R$)'].max():.2f}")
+        else:
+            st.info("📊 Nenhum dado de venda disponível")
+    
+    with tab2:
+        st.header("📦 Produtos Mais Vendidos")
+        relatorio_produtos = gerar_relatorio_produtos()
+        
+        if not relatorio_produtos.empty:
+            st.dataframe(relatorio_produtos, use_container_width=True)
+            
+            # Gráfico de produtos mais vendidos
+            fig = px.bar(relatorio_produtos.head(10), x='Produto', y='Total Vendido',
+                        title='Top 10 Produtos Mais Vendidos')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("📦 Nenhum dado de produto vendido disponível")
+    
+    with tab3:
+        st.header("👥 Clientes Mais Ativos")
+        relatorio_clientes = gerar_relatorio_clientes()
+        
+        if not relatorio_clientes.empty:
+            st.dataframe(relatorio_clientes, use_container_width=True)
+            
+            # Gráfico de clientes que mais gastam
+            fig = px.bar(relatorio_clientes.head(10), x='Cliente', y='Total Gasto (R$)',
+                        title='Top 10 Clientes que Mais Gastam')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("👥 Nenhum dado de cliente disponível")
 
+# Rodapé
 st.sidebar.markdown("---")
-st.sidebar.markdown("👕 **FashionManager**")
-st.sidebar.caption("v6.0 • Mobile")
+st.sidebar.info("👕 Sistema de Fardamentos v8.1\n\n🗄️ **Banco de Dados PostgreSQL**")
 
-# Indicador de ambiente
-if os.environ.get('DATABASE_URL') or os.environ.get('DB_HOST'):
-    st.sidebar.success("🌐 Online")
-else:
-    st.sidebar.info("💻 Local")
+# Botão para recarregar dados
+if st.sidebar.button("🔄 Recarregar Dados"):
+    st.rerun()
