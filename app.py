@@ -6,12 +6,6 @@ import numpy as np
 import io
 import csv
 import base64
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
-from reportlab.lib.units import inch
-from reportlab.pdfgen import canvas
 import tempfile
 import os
 
@@ -76,6 +70,9 @@ st.markdown("""
     .pagination-btn {
         margin: 0 0.2rem;
         padding: 0.3rem 0.6rem;
+    }
+    .stButton a {
+        text-decoration: none;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -608,11 +605,11 @@ def editar_cliente(cliente_id, nome, telefone=None, email=None, data_nascimento=
             conn.close()
 
 # =========================================
-# 📄 FUNÇÕES DE RELATÓRIO (SIMPLIFICADAS)
+# 📄 FUNÇÕES DE RELATÓRIO (APENAS CSV)
 # =========================================
 
 def gerar_csv_dados(tipo_dados):
-    """Gera CSV em vez de PDF"""
+    """Gera CSV para exportação"""
     conn = get_connection()
     if not conn:
         return None
