@@ -2,12 +2,9 @@ import streamlit as st
 import sqlite3
 import hashlib
 from datetime import datetime, date, timedelta
-import numpy as np
 import io
 import csv
 import base64
-import tempfile
-import os
 
 # =========================================
 # 🎯 CONFIGURAÇÃO
@@ -73,6 +70,15 @@ st.markdown("""
     }
     .stButton a {
         text-decoration: none;
+        background-color: #4CAF50;
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        border: none;
+        cursor: pointer;
+    }
+    .stButton a:hover {
+        background-color: #45a049;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -605,6 +611,93 @@ def editar_cliente(cliente_id, nome, telefone=None, email=None, data_nascimento=
             conn.close()
 
 # =========================================
+# 📦 FUNÇÕES DE PEDIDOS
+# =========================================
+
+def criar_pedido(cliente_id, itens, observacoes="", forma_pagamento="", vendedor_id=1):
+    """Cria um novo pedido"""
+    conn = get_connection()
+    if not conn:
+        return False, "Erro de conexão"
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Calcular valor total
+        valor_total = sum(item['quantidade'] * item['preco_unitario'] for item in itens)
+        valor_final = valor_total  # Sem desconto por padrão
+        
+        # Inserir pedido
+        cursor.execute('''
+            INSERT INTO pedidos (cliente_id, valor_total, valor_final, observacoes, forma_pagamento, vendedor_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (cliente_id, valor_total, valor_final, observacoes, forma_pagamento, vendedor_id))
+        
+        pedido_id = cursor.lastrowid
+        
+        # Inserir itens do pedido
+        for item in itens:
+            subtotal = item['quantidade'] * item['preco_unitario']
+            cursor.execute('''
+                INSERT INTO pedido_itens (pedido_id, produto_id, quantidade, preco_unitario, subtotal)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (pedido_id, item['produto_id'], item['quantidade'], item['preco_unitario'], subtotal))
+        
+        conn.commit()
+        return True, f"✅ Pedido #{pedido_id} criado com sucesso!"
+        
+    except Exception as e:
+        return False, f"❌ Erro ao criar pedido: {str(e)}"
+    finally:
+        if conn:
+            conn.close()
+
+def listar_pedidos():
+    """Lista todos os pedidos"""
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT p.*, c.nome as cliente_nome, u.nome_completo as vendedor_nome
+            FROM pedidos p
+            LEFT JOIN clientes c ON p.cliente_id = c.id
+            LEFT JOIN usuarios u ON p.vendedor_id = u.id
+            ORDER BY p.data_pedido DESC
+        ''')
+        return cursor.fetchall()
+    except Exception as e:
+        st.error(f"Erro ao listar pedidos: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def listar_produtos():
+    """Lista produtos para pedidos"""
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, nome, categoria, tamanho, cor, preco, estoque
+            FROM produtos 
+            WHERE estoque > 0 AND ativo = 1
+            ORDER BY nome, tamanho
+        ''')
+        return cursor.fetchall()
+    except Exception as e:
+        st.error(f"Erro ao listar produtos: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+# =========================================
 # 📄 FUNÇÕES DE RELATÓRIO (APENAS CSV)
 # =========================================
 
@@ -845,6 +938,178 @@ def mostrar_clientes():
             st.info("Nenhum cliente cadastrado para editar.")
 
 # =========================================
+# 📦 INTERFACE DE PEDIDOS
+# =========================================
+
+def mostrar_pedidos():
+    """Interface de pedidos com datas em português"""
+    st.header("📦 Gerenciar Pedidos")
+    
+    tab1, tab2 = st.tabs(["📋 Lista de Pedidos", "➕ Novo Pedido"])
+    
+    with tab1:
+        st.subheader("Pedidos Realizados")
+        
+        pedidos = listar_pedidos()
+        if not pedidos:
+            st.info("Nenhum pedido encontrado.")
+        else:
+            for pedido in pedidos:
+                with st.expander(f"Pedido #{pedido['id']} - {pedido['cliente_nome']} - {formatar_datahora_brasil(pedido['data_pedido'])}"):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.write(f"**Cliente:** {pedido['cliente_nome']}")
+                        st.write(f"**Status:** {pedido['status']}")
+                        st.write(f"**Vendedor:** {pedido['vendedor_nome'] or 'N/A'}")
+                    
+                    with col2:
+                        st.write(f"**Data do Pedido:** {formatar_datahora_brasil(pedido['data_pedido'])}")
+                        if pedido['data_entrega_prevista']:
+                            st.write(f"**Entrega Prevista:** {formatar_data_brasil(pedido['data_entrega_prevista'])}")
+                        if pedido['data_entrega_real']:
+                            st.write(f"**Entrega Real:** {formatar_data_brasil(pedido['data_entrega_real'])}")
+                    
+                    with col3:
+                        st.write(f"**Valor Total:** R$ {pedido['valor_total']:.2f}")
+                        st.write(f"**Valor Final:** R$ {pedido['valor_final']:.2f}")
+                        st.write(f"**Pagamento:** {pedido['forma_pagamento'] or 'N/A'}")
+                    
+                    if pedido['observacoes']:
+                        st.write(f"**Observações:** {pedido['observacoes']}")
+    
+    with tab2:
+        st.subheader("Criar Novo Pedido")
+        
+        # Selecionar cliente
+        clientes = listar_clientes_paginado(0, 100)
+        if not clientes:
+            st.warning("Nenhum cliente cadastrado. Cadastre clientes primeiro.")
+            return
+        
+        cliente_opcoes = {f"{c['nome']} - {c['telefone'] or 'N/A'}": c['id'] for c in clientes}
+        cliente_selecionado = st.selectbox("Selecione o cliente:", options=list(cliente_opcoes.keys()))
+        
+        if cliente_selecionado:
+            cliente_id = cliente_opcoes[cliente_selecionado]
+            
+            # Selecionar produtos
+            produtos = listar_produtos()
+            if not produtos:
+                st.warning("Nenhum produto disponível em estoque.")
+                return
+            
+            st.subheader("Adicionar Itens ao Pedido")
+            
+            if 'itens_pedido' not in st.session_state:
+                st.session_state.itens_pedido = []
+            
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+            
+            with col1:
+                produto_selecionado = st.selectbox(
+                    "Produto:",
+                    options=[f"{p['id']} - {p['nome']} ({p['tamanho']}) - R$ {p['preco']:.2f}" for p in produtos],
+                    key="produto_select"
+                )
+            
+            with col2:
+                quantidade = st.number_input("Quantidade:", min_value=1, value=1, key="quantidade_input")
+            
+            with col3:
+                if produto_selecionado:
+                    produto_id = int(produto_selecionado.split(' - ')[0])
+                    produto_info = next((p for p in produtos if p['id'] == produto_id), None)
+                    if produto_info:
+                        preco_unitario = produto_info['preco']
+                        st.write(f"**Preço unitário:** R$ {preco_unitario:.2f}")
+            
+            with col4:
+                st.write("")  # Espaço
+                if st.button("➕ Adicionar", key="add_item"):
+                    if produto_selecionado:
+                        produto_id = int(produto_selecionado.split(' - ')[0])
+                        produto_info = next((p for p in produtos if p['id'] == produto_id), None)
+                        
+                        if produto_info:
+                            # Verificar estoque
+                            if quantidade > produto_info['estoque']:
+                                st.error(f"❌ Estoque insuficiente! Disponível: {produto_info['estoque']}")
+                            else:
+                                item = {
+                                    'produto_id': produto_id,
+                                    'nome': produto_info['nome'],
+                                    'tamanho': produto_info['tamanho'],
+                                    'quantidade': quantidade,
+                                    'preco_unitario': produto_info['preco'],
+                                    'subtotal': quantidade * produto_info['preco']
+                                }
+                                st.session_state.itens_pedido.append(item)
+                                st.success(f"✅ {quantidade}x {produto_info['nome']} adicionado!")
+                                st.rerun()
+            
+            # Mostrar itens do pedido
+            if st.session_state.itens_pedido:
+                st.subheader("Itens do Pedido")
+                total_pedido = 0
+                
+                for i, item in enumerate(st.session_state.itens_pedido):
+                    col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
+                    
+                    with col1:
+                        st.write(f"**{item['nome']}** ({item['tamanho']})")
+                    
+                    with col2:
+                        st.write(f"Qtd: {item['quantidade']}")
+                    
+                    with col3:
+                        st.write(f"R$ {item['preco_unitario']:.2f}")
+                    
+                    with col4:
+                        subtotal = item['quantidade'] * item['preco_unitario']
+                        st.write(f"**R$ {subtotal:.2f}**")
+                        total_pedido += subtotal
+                    
+                    with col5:
+                        if st.button("🗑️", key=f"remove_{i}"):
+                            st.session_state.itens_pedido.pop(i)
+                            st.rerun()
+                
+                st.write(f"**Total do Pedido: R$ {total_pedido:.2f}**")
+                
+                # Forma de pagamento e observações
+                forma_pagamento = st.selectbox(
+                    "Forma de Pagamento:",
+                    ["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Boleto"],
+                    key="forma_pagamento"
+                )
+                
+                observacoes = st.text_area("Observações:", placeholder="Observações sobre o pedido...")
+                
+                # Botão finalizar pedido
+                if st.button("✅ Finalizar Pedido", type="primary"):
+                    if not st.session_state.itens_pedido:
+                        st.error("❌ Adicione itens ao pedido!")
+                    else:
+                        success, message = criar_pedido(
+                            cliente_id=cliente_id,
+                            itens=st.session_state.itens_pedido,
+                            observacoes=observacoes,
+                            forma_pagamento=forma_pagamento,
+                            vendedor_id=1  # ID do usuário logado (simplificado)
+                        )
+                        
+                        if success:
+                            st.success(message)
+                            # Limpar itens do pedido
+                            st.session_state.itens_pedido = []
+                            st.rerun()
+                        else:
+                            st.error(message)
+            else:
+                st.info("Adicione itens ao pedido usando o formulário acima.")
+
+# =========================================
 # 🏠 PÁGINA DE LOGIN
 # =========================================
 
@@ -996,37 +1261,6 @@ def mostrar_menu_principal():
         st.rerun()
     
     return menu
-
-# =========================================
-# 📦 FUNÇÕES DE PEDIDOS (SIMPLIFICADAS)
-# =========================================
-
-def mostrar_pedidos():
-    """Interface simplificada de pedidos"""
-    st.header("📦 Gerenciar Pedidos")
-    st.info("Funcionalidade de pedidos em desenvolvimento...")
-    
-    # Aqui você pode implementar a lógica completa de pedidos
-    tab1, tab2 = st.tabs(["📋 Lista de Pedidos", "➕ Novo Pedido"])
-    
-    with tab1:
-        st.subheader("Pedidos Recentes")
-        # Implementar lista de pedidos
-    
-    with tab2:
-        st.subheader("Criar Novo Pedido")
-        
-        # Selecionar cliente
-        clientes = listar_clientes_paginado(0, 100)
-        if clientes:
-            cliente_opcoes = {f"{c['nome']} - {c['telefone'] or 'N/A'}": c['id'] for c in clientes}
-            cliente_selecionado = st.selectbox("Selecione o cliente:", options=list(cliente_opcoes.keys()))
-            
-            if cliente_selecionado:
-                st.success(f"Cliente selecionado: {cliente_selecionado}")
-                # Continuar com a criação do pedido...
-        else:
-            st.warning("Nenhum cliente cadastrado. Cadastre clientes primeiro.")
 
 # =========================================
 # 📊 FUNÇÕES DE RELATÓRIOS
