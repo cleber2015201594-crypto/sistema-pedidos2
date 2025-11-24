@@ -2,9 +2,6 @@ import streamlit as st
 import sqlite3
 import hashlib
 from datetime import datetime, date, timedelta
-import plotly.express as px
-import plotly.graph_objects as go
-from sklearn.linear_model import LinearRegression
 import numpy as np
 import io
 import csv
@@ -873,7 +870,7 @@ def exportar_pedidos_para_csv():
             conn.close()
 
 # =========================================
-# 🤖 SISTEMA DE A.I. E ANÁLISES (SEM PANDAS)
+# 🤖 SISTEMA DE A.I. E ANÁLISES (SEM PLOTLY)
 # =========================================
 
 def gerar_metricas_avancadas():
@@ -917,7 +914,7 @@ def gerar_metricas_avancadas():
             conn.close()
 
 def previsao_vendas_simples():
-    """Previsão simples de vendas usando regressão linear (sem pandas)"""
+    """Previsão simples de vendas usando regressão linear (sem plotly)"""
     conn = get_connection()
     if not conn:
         return None
@@ -939,7 +936,7 @@ def previsao_vendas_simples():
         if len(dados) < 5:
             return None
         
-        # Preparar dados para o modelo sem pandas
+        # Preparar dados para o modelo
         datas = []
         totais = []
         dias_numeros = []
@@ -965,6 +962,7 @@ def previsao_vendas_simples():
         X = np.array(dias_numeros).reshape(-1, 1)
         y = np.array(totais)
         
+        from sklearn.linear_model import LinearRegression
         modelo = LinearRegression()
         modelo.fit(X, y)
         
@@ -1111,7 +1109,7 @@ def analise_clientes():
             conn.close()
 
 def gerar_relatorio_ai():
-    """Gera relatório completo com insights de A.I."""
+    """Gera relatório completo com insights de A.I. (sem plotly)"""
     st.subheader("🤖 Relatório de Inteligência Artificial")
     
     with st.spinner("Analisando dados e gerando insights..."):
@@ -1148,23 +1146,18 @@ def gerar_relatorio_ai():
             col1, col2 = st.columns(2)
             
             with col1:
-                # Gráfico de previsão
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=previsao['datas'],
-                    y=previsao['previsoes'],
-                    mode='lines+markers',
-                    name='Previsão',
-                    line=dict(color='#28a745', width=3)
-                ))
+                # Mostrar previsões em uma tabela
+                st.write("**Previsões de Vendas:**")
+                dados_tabela = []
+                for data, previsao_valor in zip(previsao['datas'], previsao['previsoes']):
+                    dados_tabela.append({
+                        'Data': formatar_data_brasil(data),
+                        'Previsão (R$)': f"R$ {previsao_valor:.2f}"
+                    })
                 
-                fig.update_layout(
-                    title='Previsão de Vendas',
-                    xaxis_title='Data',
-                    yaxis_title='Valor Previsto (R$)',
-                    height=300
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                # Exibir como tabela simples
+                for item in dados_tabela:
+                    st.write(f"📅 {item['Data']}: {item['Previsão (R$)']}")
             
             with col2:
                 st.metric("Tendência", "📈 Alta" if previsao['tendencia'] == 'alta' else "📉 Baixa")
@@ -1231,30 +1224,14 @@ def gerar_relatorio_ai():
                         st.write(f"• {detalhe}")
                     st.markdown('</div>', unsafe_allow_html=True)
         
-        # Produtos Populares (sem pandas)
+        # Produtos Populares (sem plotly)
         if metricas and 'produtos_populares' in metricas and metricas['produtos_populares']:
             st.subheader("🏆 Produtos Mais Populares")
             
-            # Preparar dados para o gráfico sem pandas
-            nomes_produtos = [p['nome'] for p in metricas['produtos_populares'][:5]]
-            vendas_produtos = [p['total_vendido'] for p in metricas['produtos_populares'][:5]]
-            
-            fig = go.Figure(data=[
-                go.Bar(
-                    x=nomes_produtos,
-                    y=vendas_produtos,
-                    marker_color='lightblue'
-                )
-            ])
-            
-            fig.update_layout(
-                title='Top 5 Produtos Mais Vendidos',
-                xaxis_title='Produtos',
-                yaxis_title='Quantidade Vendida',
-                height=400
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
+            # Mostrar como lista ordenada
+            st.write("**Top 5 Produtos Mais Vendidos:**")
+            for i, produto in enumerate(metricas['produtos_populares'][:5], 1):
+                st.write(f"{i}. **{produto['nome']}** - {produto['total_vendido']} unidades vendidas")
 
 # =========================================
 # 🚀 INTERFACES POR TIPO DE USUÁRIO
