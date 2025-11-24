@@ -44,6 +44,56 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================
+# 🇧🇷 FUNÇÕES DE FORMATAÇÃO BRASILEIRA
+# =========================================
+
+def formatar_data_brasil(data_string):
+    """Converte data do banco (YYYY-MM-DD) para formato brasileiro (DD/MM/YYYY)"""
+    if not data_string:
+        return "N/A"
+    
+    try:
+        # Se já estiver no formato brasileiro, retorna como está
+        if '/' in str(data_string):
+            return str(data_string)
+            
+        # Converte do formato do banco para brasileiro
+        if isinstance(data_string, str) and len(data_string) >= 10:
+            partes = data_string.split('-')
+            if len(partes) >= 3:
+                return f"{partes[2]}/{partes[1]}/{partes[0]}"
+        
+        return str(data_string)
+    except:
+        return str(data_string)
+
+def formatar_datahora_brasil(datahora_string):
+    """Converte data/hora para formato brasileiro"""
+    if not datahora_string:
+        return "N/A"
+    
+    try:
+        # Para datetime completo
+        if ' ' in str(datahora_string):
+            data_part, hora_part = str(datahora_string).split(' ', 1)
+            data_brasil = formatar_data_brasil(data_part)
+            # Formatar hora (remove segundos se necessário)
+            hora_part = hora_part[:5]  # Mantém apenas HH:MM
+            return f"{data_brasil} {hora_part}"
+        else:
+            return formatar_data_brasil(datahora_string)
+    except:
+        return str(datahora_string)
+
+def data_atual_brasil():
+    """Retorna data atual no formato brasileiro"""
+    return datetime.now().strftime("%d/%m/%Y")
+
+def hora_atual_brasil():
+    """Retorna hora atual no formato brasileiro"""
+    return datetime.now().strftime("%H:%M")
+
+# =========================================
 # 🔐 SISTEMA DE AUTENTICAÇÃO
 # =========================================
 
@@ -94,16 +144,14 @@ def init_db():
             )
         ''')
         
-        # Tabela de clientes
+        # Tabela de clientes (SEM VÍNCULO COM ESCOLA)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS clientes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nome TEXT NOT NULL,
                 telefone TEXT,
                 email TEXT,
-                escola_id INTEGER,
-                data_cadastro DATE DEFAULT CURRENT_DATE,
-                FOREIGN KEY (escola_id) REFERENCES escolas (id)
+                data_cadastro DATE DEFAULT CURRENT_DATE
             )
         ''')
         
@@ -340,11 +388,7 @@ def excluir_escola(escola_id):
     try:
         cursor = conn.cursor()
         
-        # Verificar se há clientes ou produtos vinculados
-        cursor.execute("SELECT COUNT(*) FROM clientes WHERE escola_id = ?", (escola_id,))
-        if cursor.fetchone()[0] > 0:
-            return False, "❌ Escola possui clientes vinculados"
-        
+        # Verificar se há produtos vinculados
         cursor.execute("SELECT COUNT(*) FROM produtos WHERE escola_id = ?", (escola_id,))
         if cursor.fetchone()[0] > 0:
             return False, "❌ Escola possui produtos vinculados"
@@ -358,7 +402,8 @@ def excluir_escola(escola_id):
         if conn:
             conn.close()
 
-def adicionar_cliente(nome, telefone, email, escola_id):
+def adicionar_cliente(nome, telefone, email):
+    """Adiciona cliente SEM vínculo com escola"""
     conn = get_connection()
     if not conn:
         return False, "Erro de conexão"
@@ -366,8 +411,8 @@ def adicionar_cliente(nome, telefone, email, escola_id):
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO clientes (nome, telefone, email, escola_id) VALUES (?, ?, ?, ?)",
-            (nome, telefone, email, escola_id)
+            "INSERT INTO clientes (nome, telefone, email) VALUES (?, ?, ?)",
+            (nome, telefone, email)
         )
         conn.commit()
         return True, "✅ Cliente cadastrado com sucesso!"
@@ -377,28 +422,15 @@ def adicionar_cliente(nome, telefone, email, escola_id):
         if conn:
             conn.close()
 
-def listar_clientes(escola_id=None):
+def listar_clientes():
+    """Lista todos os clientes"""
     conn = get_connection()
     if not conn:
         return []
     
     try:
         cursor = conn.cursor()
-        if escola_id:
-            cursor.execute('''
-                SELECT c.*, e.nome as escola_nome 
-                FROM clientes c 
-                LEFT JOIN escolas e ON c.escola_id = e.id 
-                WHERE c.escola_id = ?
-                ORDER BY c.nome
-            ''', (escola_id,))
-        else:
-            cursor.execute('''
-                SELECT c.*, e.nome as escola_nome 
-                FROM clientes c 
-                LEFT JOIN escolas e ON c.escola_id = e.id 
-                ORDER BY c.nome
-            ''')
+        cursor.execute('SELECT * FROM clientes ORDER BY nome')
         return cursor.fetchall()
     except Exception as e:
         st.error(f"Erro ao listar clientes: {e}")
@@ -429,7 +461,7 @@ def excluir_cliente(cliente_id):
         if conn:
             conn.close()
 
-def editar_cliente(cliente_id, nome, telefone, email, escola_id):
+def editar_cliente(cliente_id, nome, telefone, email):
     """Edita cliente existente"""
     conn = get_connection()
     if not conn:
@@ -439,9 +471,9 @@ def editar_cliente(cliente_id, nome, telefone, email, escola_id):
         cursor = conn.cursor()
         cursor.execute('''
             UPDATE clientes 
-            SET nome = ?, telefone = ?, email = ?, escola_id = ?
+            SET nome = ?, telefone = ?, email = ?
             WHERE id = ?
-        ''', (nome, telefone, email, escola_id, cliente_id))
+        ''', (nome, telefone, email, cliente_id))
         
         conn.commit()
         return True, "✅ Cliente atualizado com sucesso!"
@@ -591,7 +623,8 @@ def adicionar_pedido(cliente_id, itens, data_entrega, observacoes):
         if conn:
             conn.close()
 
-def listar_pedidos(usuario_tipo, escola_id=None):
+def listar_pedidos(usuario_tipo):
+    """Lista pedidos - cliente NÃO tem mais escola"""
     conn = get_connection()
     if not conn:
         return []
@@ -599,25 +632,12 @@ def listar_pedidos(usuario_tipo, escola_id=None):
     try:
         cursor = conn.cursor()
         
-        if usuario_tipo == 'vendedor' and escola_id:
-            # Vendedor só vê pedidos da sua escola
-            cursor.execute('''
-                SELECT p.*, c.nome as cliente_nome, e.nome as escola_nome
-                FROM pedidos p
-                JOIN clientes c ON p.cliente_id = c.id
-                JOIN escolas e ON c.escola_id = e.id
-                WHERE c.escola_id = ?
-                ORDER BY p.data_pedido DESC
-            ''', (escola_id,))
-        else:
-            # Admin e gestor veem todos os pedidos
-            cursor.execute('''
-                SELECT p.*, c.nome as cliente_nome, e.nome as escola_nome
-                FROM pedidos p
-                JOIN clientes c ON p.cliente_id = c.id
-                JOIN escolas e ON c.escola_id = e.id
-                ORDER BY p.data_pedido DESC
-            ''')
+        cursor.execute('''
+            SELECT p.*, c.nome as cliente_nome
+            FROM pedidos p
+            JOIN clientes c ON p.cliente_id = c.id
+            ORDER BY p.data_pedido DESC
+        ''')
         
         return cursor.fetchall()
     except Exception as e:
@@ -688,102 +708,6 @@ def excluir_pedido(pedido_id):
             conn.close()
 
 # =========================================
-# 📈 RELATÓRIOS SEM PANDAS
-# =========================================
-
-def gerar_relatorio_vendas_por_escola(data_inicio=None, data_fim=None):
-    """Gera relatório de vendas por escola"""
-    conn = get_connection()
-    if not conn:
-        return []
-    
-    try:
-        cursor = conn.cursor()
-        
-        query = '''
-            SELECT 
-                e.nome as escola,
-                COUNT(p.id) as total_pedidos,
-                SUM(p.valor_total) as total_vendas,
-                AVG(p.valor_total) as ticket_medio
-            FROM pedidos p
-            JOIN clientes c ON p.cliente_id = c.id
-            JOIN escolas e ON c.escola_id = e.id
-        '''
-        
-        params = []
-        if data_inicio and data_fim:
-            query += " WHERE DATE(p.data_pedido) BETWEEN ? AND ?"
-            params.extend([data_inicio, data_fim])
-        
-        query += " GROUP BY e.id, e.nome ORDER BY total_vendas DESC"
-        
-        cursor.execute(query, params)
-        return cursor.fetchall()
-        
-    except Exception as e:
-        st.error(f"Erro ao gerar relatório: {e}")
-        return []
-    finally:
-        if conn:
-            conn.close()
-
-def gerar_relatorio_produtos_por_escola():
-    """Gera relatório de produtos por escola"""
-    conn = get_connection()
-    if not conn:
-        return []
-    
-    try:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT 
-                e.nome as escola,
-                p.categoria,
-                COUNT(p.id) as total_produtos,
-                SUM(p.estoque) as estoque_total,
-                SUM(p.estoque * p.preco) as valor_estoque
-            FROM produtos p
-            JOIN escolas e ON p.escola_id = e.id
-            GROUP BY e.id, e.nome, p.categoria
-            ORDER BY e.nome, p.categoria
-        ''')
-        return cursor.fetchall()
-    except Exception as e:
-        st.error(f"Erro ao gerar relatório: {e}")
-        return []
-    finally:
-        if conn:
-            conn.close()
-
-def gerar_relatorio_clientes_por_escola():
-    """Gera relatório de clientes por escola"""
-    conn = get_connection()
-    if not conn:
-        return []
-    
-    try:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT 
-                e.nome as escola,
-                COUNT(c.id) as total_clientes,
-                COUNT(DISTINCT p.cliente_id) as clientes_com_pedidos
-            FROM clientes c
-            JOIN escolas e ON c.escola_id = e.id
-            LEFT JOIN pedidos p ON c.id = p.cliente_id
-            GROUP BY e.id, e.nome
-            ORDER BY total_clientes DESC
-        ''')
-        return cursor.fetchall()
-    except Exception as e:
-        st.error(f"Erro ao gerar relatório: {e}")
-        return []
-    finally:
-        if conn:
-            conn.close()
-
-# =========================================
 # 🚀 INTERFACES POR TIPO DE USUÁRIO
 # =========================================
 
@@ -791,8 +715,8 @@ def interface_admin():
     """Interface para Administrador"""
     st.header("👑 Painel do Administrador")
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📊 Dashboard", "👥 Clientes", "👕 Produtos", "📦 Pedidos", "🏫 Escolas", "👤 Usuários", "📈 Relatórios"
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Dashboard", "👥 Clientes", "👕 Produtos", "📦 Pedidos", "🏫 Escolas", "👤 Usuários"
     ])
     
     with tab1:
@@ -815,6 +739,10 @@ def interface_admin():
         with col4:
             estoque_baixo = len([p for p in produtos if p['estoque'] < 5])
             st.metric("Alerta Estoque", estoque_baixo)
+        
+        # Data e hora atual
+        st.write(f"**📅 Data atual:** {data_atual_brasil()}")
+        st.write(f"**🕒 Hora atual:** {hora_atual_brasil()}")
     
     with tab2:
         st.subheader("👥 Gestão de Clientes")
@@ -825,37 +753,32 @@ def interface_admin():
             st.write("➕ Novo Cliente")
             with st.form("novo_cliente_admin", clear_on_submit=True):
                 nome = st.text_input("Nome completo*")
-                telefone = st.text_input("Telefone")
+                telefone = st.text_input("Telefone*")
                 email = st.text_input("Email")
                 
-                escolas = listar_escolas()
-                escola_id = st.selectbox("Escola*", 
-                                       options=[e['id'] for e in escolas],
-                                       format_func=lambda x: next(e['nome'] for e in escolas if e['id'] == x))
-                
                 if st.form_submit_button("✅ Cadastrar Cliente"):
-                    if nome and escola_id:
-                        sucesso, msg = adicionar_cliente(nome, telefone, email, escola_id)
+                    if nome and telefone:
+                        sucesso, msg = adicionar_cliente(nome, telefone, email)
                         if sucesso:
                             st.success(msg)
                             st.rerun()
                         else:
                             st.error(msg)
                     else:
-                        st.error("❌ Nome e escola são obrigatórios!")
+                        st.error("❌ Nome e telefone são obrigatórios!")
         
         with col2:
             st.write("📋 Clientes Cadastrados")
             clientes = listar_clientes()
             
             for cliente in clientes:
-                with st.expander(f"👤 {cliente['nome']} - {cliente['escola_nome']}"):
+                with st.expander(f"👤 {cliente['nome']}", expanded=False):
                     col_a, col_b = st.columns(2)
                     with col_a:
                         st.write(f"**Telefone:** {cliente['telefone'] or 'N/A'}")
                         st.write(f"**Email:** {cliente['email'] or 'N/A'}")
                     with col_b:
-                        st.write(f"**Data Cadastro:** {cliente['data_cadastro']}")
+                        st.write(f"**Data Cadastro:** {formatar_data_brasil(cliente['data_cadastro'])}")
                     
                     col_c, col_d = st.columns(2)
                     with col_c:
@@ -1025,44 +948,13 @@ def interface_admin():
                                     st.error(msg)
                             else:
                                 st.error("❌ Digite uma nova senha")
-    
-    with tab7:
-        st.subheader("📈 Relatórios por Escola")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("📊 Vendas por Escola")
-            relatorio_vendas = gerar_relatorio_vendas_por_escola()
-            
-            if relatorio_vendas:
-                for item in relatorio_vendas:
-                    st.metric(
-                        label=f"🏫 {item['escola']}",
-                        value=f"R$ {item['total_vendas']:,.2f}",
-                        delta=f"{item['total_pedidos']} pedidos"
-                    )
-            else:
-                st.info("📊 Sem dados de vendas para exibir")
-        
-        with col2:
-            st.write("👥 Clientes por Escola")
-            relatorio_clientes = gerar_relatorio_clientes_por_escola()
-            
-            if relatorio_clientes:
-                for item in relatorio_clientes:
-                    st.metric(
-                        label=f"🏫 {item['escola']}",
-                        value=f"{item['total_clientes']} clientes",
-                        delta=f"{item['clientes_com_pedidos']} ativos"
-                    )
 
 def interface_gestor():
     """Interface para Gestor"""
     st.header("📈 Painel do Gestor")
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Dashboard", "👥 Clientes", "👕 Produtos", "📦 Pedidos", "📈 Relatórios"
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Dashboard", "👥 Clientes", "👕 Produtos", "📦 Pedidos"
     ])
     
     with tab1:
@@ -1083,15 +975,19 @@ def interface_gestor():
             produtos = listar_produtos()
             estoque_total = sum(p['estoque'] for p in produtos)
             st.metric("Estoque Total", estoque_total)
+        
+        # Data e hora atual
+        st.write(f"**📅 Data atual:** {data_atual_brasil()}")
+        st.write(f"**🕒 Hora atual:** {hora_atual_brasil()}")
     
     with tab2:
         st.subheader("👥 Clientes")
         
         clientes = listar_clientes()
         for cliente in clientes:
-            with st.expander(f"👤 {cliente['nome']} - {cliente['escola_nome']}"):
+            with st.expander(f"👤 {cliente['nome']}"):
                 st.write(f"**Contato:** {cliente['telefone']} | {cliente['email']}")
-                st.write(f"**Cadastro:** {cliente['data_cadastro']}")
+                st.write(f"**Cadastro:** {formatar_data_brasil(cliente['data_cadastro'])}")
     
     with tab3:
         st.subheader("👕 Produtos e Estoque")
@@ -1112,35 +1008,18 @@ def interface_gestor():
     
     with tab4:
         interface_pedidos('gestor')
-    
-    with tab5:
-        st.subheader("📈 Relatórios")
-        
-        st.write("📊 Vendas por Escola")
-        relatorio_vendas = gerar_relatorio_vendas_por_escola()
-        
-        if relatorio_vendas:
-            for item in relatorio_vendas:
-                st.write(f"**{item['escola']}**")
-                st.write(f"- Total Vendas: R$ {item['total_vendas']:,.2f}")
-                st.write(f"- Pedidos: {item['total_pedidos']}")
-                st.write(f"- Ticket Médio: R$ {item['ticket_medio']:,.2f}")
-                st.write("---")
 
 def interface_vendedor():
     """Interface para Vendedor"""
     st.header("👔 Painel do Vendedor")
     
-    # Vendedor está associado a uma escola específica
-    escola_vendedor = 1  # Exemplo - em sistema real viria do banco
-    
     tab1, tab2, tab3 = st.tabs(["📦 Pedidos", "👥 Clientes", "📦 Estoque"])
     
     with tab1:
-        interface_pedidos('vendedor', escola_vendedor)
+        interface_pedidos('vendedor')
     
     with tab2:
-        st.subheader("👥 Clientes da Minha Escola")
+        st.subheader("👥 Clientes")
         
         col1, col2 = st.columns(2)
         
@@ -1153,7 +1032,7 @@ def interface_vendedor():
                 
                 if st.form_submit_button("✅ Cadastrar Cliente"):
                     if nome and telefone:
-                        sucesso, msg = adicionar_cliente(nome, telefone, email, escola_vendedor)
+                        sucesso, msg = adicionar_cliente(nome, telefone, email)
                         if sucesso:
                             st.success(msg)
                             st.rerun()
@@ -1163,43 +1042,43 @@ def interface_vendedor():
                         st.error("❌ Nome e telefone são obrigatórios!")
         
         with col2:
-            clientes = listar_clientes(escola_vendedor)
+            clientes = listar_clientes()
             for cliente in clientes:
                 with st.expander(f"👤 {cliente['nome']}"):
                     st.write(f"**Telefone:** {cliente['telefone']}")
                     st.write(f"**Email:** {cliente['email'] or 'N/A'}")
-                    st.write(f"**Cadastro:** {cliente['data_cadastro']}")
+                    st.write(f"**Cadastro:** {formatar_data_brasil(cliente['data_cadastro'])}")
     
     with tab3:
-        st.subheader("📦 Estoque da Minha Escola")
+        st.subheader("📦 Estoque de Todas as Escolas")
         
-        produtos = listar_produtos(escola_vendedor)
-        for produto in produtos:
-            col1, col2, col3 = st.columns([3, 1, 1])
-            with col1:
-                st.write(f"**{produto['nome']}** - {produto['tamanho']} - {produto['cor']}")
-            with col2:
-                if produto['estoque'] < 5:
-                    st.error(f"Estoque: {produto['estoque']}")
-                elif produto['estoque'] < 10:
-                    st.warning(f"Estoque: {produto['estoque']}")
-                else:
-                    st.success(f"Estoque: {produto['estoque']}")
-            with col3:
-                st.write(f"R$ {produto['preco']:.2f}")
+        escolas = listar_escolas()
+        for escola in escolas:
+            with st.expander(f"🏫 {escola['nome']}"):
+                produtos = listar_produtos(escola['id'])
+                for produto in produtos:
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        st.write(f"**{produto['nome']}** - {produto['tamanho']} - {produto['cor']}")
+                    with col2:
+                        if produto['estoque'] < 5:
+                            st.error(f"Estoque: {produto['estoque']}")
+                        elif produto['estoque'] < 10:
+                            st.warning(f"Estoque: {produto['estoque']}")
+                        else:
+                            st.success(f"Estoque: {produto['estoque']}")
+                    with col3:
+                        st.write(f"R$ {produto['preco']:.2f}")
 
-def interface_pedidos(tipo_usuario, escola_id=None):
+def interface_pedidos(tipo_usuario):
     """Interface de pedidos compartilhada"""
     st.subheader("📦 Gestão de Pedidos")
     
     tab1, tab2 = st.tabs(["➕ Novo Pedido", "📋 Meus Pedidos"])
     
     with tab1:
-        # Selecionar cliente baseado no tipo de usuário
-        if tipo_usuario == 'vendedor' and escola_id:
-            clientes = listar_clientes(escola_id)
-        else:
-            clientes = listar_clientes()
+        # Selecionar cliente
+        clientes = listar_clientes()
         
         if not clientes:
             st.error("❌ Nenhum cliente cadastrado. Cadastre clientes primeiro.")
@@ -1208,49 +1087,57 @@ def interface_pedidos(tipo_usuario, escola_id=None):
         cliente_selecionado = st.selectbox(
             "👤 Selecione o cliente:",
             options=[c['id'] for c in clientes],
-            format_func=lambda x: f"{next(c['nome'] for c in clientes if c['id'] == x)} - {next(c['escola_nome'] for c in clientes if c['id'] == x)}"
+            format_func=lambda x: f"{next(c['nome'] for c in clientes if c['id'] == x)}"
         )
         
-        # Filtrar produtos por escola do cliente
-        cliente_escola = next(c['escola_id'] for c in clientes if c['id'] == cliente_selecionado)
-        produtos = listar_produtos(cliente_escola)
-        
-        if not produtos:
-            st.error("❌ Nenhum produto cadastrado para esta escola.")
-            return
-        
+        # Mostrar TODOS os produtos de TODAS as escolas
         st.subheader("🛒 Adicionar Itens ao Pedido")
+        st.info("🎯 O cliente pode escolher produtos de qualquer escola")
         
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            produto_selecionado = st.selectbox(
-                "Produto:",
-                options=[p['id'] for p in produtos],
-                format_func=lambda x: f"{next(p['nome'] for p in produtos if p['id'] == x)} - {next(p['tamanho'] for p in produtos if p['id'] == x)} - {next(p['cor'] for p in produtos if p['id'] == x)} (Estoque: {next(p['estoque'] for p in produtos if p['id'] == x)}) - R$ {next(p['preco'] for p in produtos if p['id'] == x):.2f}"
-            )
-        with col2:
-            quantidade = st.number_input("Quantidade", min_value=1, value=1)
-        with col3:
-            if st.button("➕ Adicionar Item", use_container_width=True):
-                if 'itens_pedido' not in st.session_state:
-                    st.session_state.itens_pedido = []
+        # Agrupar produtos por escola para melhor organização
+        escolas = listar_escolas()
+        
+        for escola in escolas:
+            with st.expander(f"🏫 {escola['nome']}", expanded=True):
+                produtos_escola = listar_produtos(escola['id'])
                 
-                produto = next(p for p in produtos if p['id'] == produto_selecionado)
-                
-                if quantidade > produto['estoque']:
-                    st.error("❌ Quantidade maior que estoque disponível!")
+                if produtos_escola:
+                    for produto in produtos_escola:
+                        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+                        with col1:
+                            st.write(f"**{produto['nome']}**")
+                            st.write(f"Tamanho: {produto['tamanho']} | Cor: {produto['cor']}")
+                        with col2:
+                            st.write(f"Estoque: {produto['estoque']}")
+                        with col3:
+                            st.write(f"R$ {produto['preco']:.2f}")
+                        with col4:
+                            # Botão para adicionar este produto específico
+                            if st.button("➕ Adicionar", key=f"add_{produto['id']}"):
+                                if 'itens_pedido' not in st.session_state:
+                                    st.session_state.itens_pedido = []
+                                
+                                # Verificar se produto já está no pedido
+                                produto_ja_adicionado = any(item['produto_id'] == produto['id'] for item in st.session_state.itens_pedido)
+                                
+                                if produto_ja_adicionado:
+                                    st.error("❌ Produto já adicionado ao pedido")
+                                elif produto['estoque'] <= 0:
+                                    st.error("❌ Produto sem estoque")
+                                else:
+                                    item = {
+                                        'produto_id': produto['id'],
+                                        'nome': produto['nome'],
+                                        'escola': produto['escola_nome'],
+                                        'quantidade': 1,
+                                        'preco_unitario': produto['preco'],
+                                        'subtotal': produto['preco'] * 1
+                                    }
+                                    st.session_state.itens_pedido.append(item)
+                                    st.success(f"✅ {produto['nome']} adicionado!")
+                                    st.rerun()
                 else:
-                    item = {
-                        'produto_id': produto['id'],
-                        'nome': produto['nome'],
-                        'escola': produto['escola_nome'],
-                        'quantidade': quantidade,
-                        'preco_unitario': produto['preco'],
-                        'subtotal': produto['preco'] * quantidade
-                    }
-                    st.session_state.itens_pedido.append(item)
-                    st.success("✅ Item adicionado ao pedido!")
-                    st.rerun()
+                    st.write("📭 Nenhum produto cadastrado para esta escola")
         
         # Itens do pedido
         if 'itens_pedido' in st.session_state and st.session_state.itens_pedido:
@@ -1258,12 +1145,22 @@ def interface_pedidos(tipo_usuario, escola_id=None):
             total_pedido = sum(item['subtotal'] for item in st.session_state.itens_pedido)
             
             for i, item in enumerate(st.session_state.itens_pedido):
-                col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 1])
+                col1, col2, col3, col4, col5, col6 = st.columns([3, 1, 1, 1, 1, 1])
                 with col1:
                     st.write(f"**{item['nome']}**")
                     st.write(f"Escola: {item['escola']}")
                 with col2:
-                    st.write(f"Qtd: {item['quantidade']}")
+                    # Permitir alterar quantidade
+                    nova_quantidade = st.number_input(
+                        "Qtd", 
+                        min_value=1, 
+                        value=item['quantidade'],
+                        key=f"qtd_{i}"
+                    )
+                    if nova_quantidade != item['quantidade']:
+                        item['quantidade'] = nova_quantidade
+                        item['subtotal'] = item['preco_unitario'] * nova_quantidade
+                        st.rerun()
                 with col3:
                     st.write(f"R$ {item['preco_unitario']:.2f}")
                 with col4:
@@ -1273,34 +1170,55 @@ def interface_pedidos(tipo_usuario, escola_id=None):
                         st.session_state.itens_pedido.pop(i)
                         st.rerun()
             
+            # Recalcular total
+            total_pedido = sum(item['subtotal'] for item in st.session_state.itens_pedido)
             st.write(f"**💰 Total do Pedido: R$ {total_pedido:.2f}**")
             
             # Finalizar pedido
+            st.subheader("✅ Finalizar Pedido")
             data_entrega = st.date_input("📅 Data de Entrega Prevista", min_value=date.today())
             observacoes = st.text_area("Observações")
             
-            if st.button("✅ Finalizar Pedido", type="primary", use_container_width=True):
-                if st.session_state.itens_pedido:
-                    sucesso, resultado = adicionar_pedido(
-                        cliente_selecionado, 
-                        st.session_state.itens_pedido, 
-                        data_entrega, 
-                        observacoes
-                    )
-                    if sucesso:
-                        st.success(f"✅ Pedido #{resultado} criado com sucesso!")
-                        st.balloons()
-                        del st.session_state.itens_pedido
-                        st.rerun()
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("✅ Finalizar Pedido", type="primary", use_container_width=True):
+                    if st.session_state.itens_pedido:
+                        # Verificar estoque para todos os itens
+                        estoque_insuficiente = False
+                        for item in st.session_state.itens_pedido:
+                            produto = next((p for p in listar_produtos() if p['id'] == item['produto_id']), None)
+                            if produto and item['quantidade'] > produto['estoque']:
+                                st.error(f"❌ Estoque insuficiente para {produto['nome']} (estoque: {produto['estoque']})")
+                                estoque_insuficiente = True
+                                break
+                        
+                        if not estoque_insuficiente:
+                            sucesso, resultado = adicionar_pedido(
+                                cliente_selecionado, 
+                                st.session_state.itens_pedido, 
+                                data_entrega, 
+                                observacoes
+                            )
+                            if sucesso:
+                                st.success(f"✅ Pedido #{resultado} criado com sucesso!")
+                                st.balloons()
+                                del st.session_state.itens_pedido
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Erro ao criar pedido: {resultado}")
                     else:
-                        st.error(f"❌ Erro ao criar pedido: {resultado}")
-                else:
-                    st.error("❌ Adicione itens ao pedido antes de finalizar!")
+                        st.error("❌ Adicione itens ao pedido antes de finalizar!")
+            
+            with col_btn2:
+                if st.button("🗑️ Limpar Pedido", use_container_width=True):
+                    if 'itens_pedido' in st.session_state:
+                        del st.session_state.itens_pedido
+                    st.rerun()
         else:
-            st.info("🛒 Adicione itens ao pedido usando o botão acima")
+            st.info("🛒 Adicione itens ao pedido usando os botões 'Adicionar' acima")
     
     with tab2:
-        pedidos = listar_pedidos(tipo_usuario, escola_id)
+        pedidos = listar_pedidos(tipo_usuario)
         
         if pedidos:
             for pedido in pedidos:
@@ -1312,18 +1230,17 @@ def interface_pedidos(tipo_usuario, escola_id=None):
                     'Cancelado': '🔴 Cancelado'
                 }.get(pedido['status'], f'⚪ {pedido["status"]}')
                 
-                with st.expander(f"{status_info} Pedido #{pedido['id']} - {pedido['cliente_nome']} - {pedido['escola_nome']}", expanded=False):
+                with st.expander(f"{status_info} Pedido #{pedido['id']} - {pedido['cliente_nome']}", expanded=False):
                     col1, col2 = st.columns(2)
                     with col1:
                         st.write(f"**Cliente:** {pedido['cliente_nome']}")
-                        st.write(f"**Escola:** {pedido['escola_nome']}")
                         st.write(f"**Status:** {pedido['status']}")
-                        st.write(f"**Data Pedido:** {pedido['data_pedido']}")
+                        st.write(f"**Data Pedido:** {formatar_datahora_brasil(pedido['data_pedido'])}")
                     with col2:
                         st.write(f"**Valor Total:** R$ {pedido['valor_total']:.2f}")
-                        st.write(f"**Entrega Prevista:** {pedido['data_entrega_prevista']}")
+                        st.write(f"**Entrega Prevista:** {formatar_data_brasil(pedido['data_entrega_prevista'])}")
                         if pedido['data_entrega_real']:
-                            st.write(f"**Entregue em:** {pedido['data_entrega_real']}")
+                            st.write(f"**Entregue em:** {formatar_data_brasil(pedido['data_entrega_real'])}")
                     
                     # Ações do pedido
                     col1, col2, col3 = st.columns(3)
@@ -1405,6 +1322,11 @@ def main():
     st.sidebar.markdown(f"**👤 {st.session_state.nome_usuario}**")
     st.sidebar.markdown(f"**🎯 {st.session_state.tipo_usuario.upper()}**")
     
+    # Data e hora atual
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(f"**📅 {data_atual_brasil()}**")
+    st.sidebar.markdown(f"**🕒 {hora_atual_brasil()}**")
+    
     # Alterar própria senha
     with st.sidebar.expander("🔐 Alterar Minha Senha"):
         with st.form("alterar_minha_senha", clear_on_submit=True):
@@ -1425,6 +1347,7 @@ def main():
                     st.error("❌ Preencha todos os campos")
     
     # Logout
+    st.sidebar.markdown("---")
     if st.sidebar.button("🚪 Sair", use_container_width=True):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
