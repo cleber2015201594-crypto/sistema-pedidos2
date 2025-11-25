@@ -23,6 +23,8 @@ def get_brasil_datetime():
 
 # Função para formatar data no padrão BR
 def format_date_br(dt):
+    if isinstance(dt, str):
+        dt = datetime.strptime(dt, '%Y-%m-%d %H:%M:%S')
     return dt.strftime("%d/%m/%Y %H:%M")
 
 # Sistema de Autenticação
@@ -189,8 +191,10 @@ def add_produto(nome, descricao, preco, custo, estoque_minimo):
     c = conn.cursor()
     c.execute('''INSERT INTO produtos (nome, descricao, preco, custo, estoque_minimo)
                  VALUES (?, ?, ?, ?, ?)''', (nome, descricao, preco, custo, estoque_minimo))
+    produto_id = c.lastrowid
     conn.commit()
     conn.close()
+    return produto_id
 
 def get_produtos():
     conn = sqlite3.connect('gestao.db')
@@ -212,6 +216,7 @@ def delete_produto(produto_id):
     conn = sqlite3.connect('gestao.db')
     c = conn.cursor()
     c.execute("DELETE FROM produtos WHERE id=?", (produto_id,))
+    c.execute("DELETE FROM estoque_escolas WHERE produto_id=?", (produto_id,))
     conn.commit()
     conn.close()
 
@@ -219,7 +224,7 @@ def delete_produto(produto_id):
 def get_estoque_escola(escola_id):
     conn = sqlite3.connect('gestao.db')
     c = conn.cursor()
-    c.execute('''SELECT e.id, p.nome, e.quantidade, p.estoque_minimo, p.preco, p.custo
+    c.execute('''SELECT e.id, p.nome, e.quantidade, p.estoque_minimo, p.preco, p.custo, p.id as produto_id
                  FROM estoque_escolas e
                  JOIN produtos p ON e.produto_id = p.id
                  WHERE e.escola_id = ?''', (escola_id,))
@@ -247,6 +252,24 @@ def update_estoque_escola(escola_id, produto_id, quantidade):
     conn.commit()
     conn.close()
 
+# Função para vincular produto a todas as escolas automaticamente
+def vincular_produto_todas_escolas(produto_id, quantidade_inicial=0):
+    conn = sqlite3.connect('gestao.db')
+    c = conn.cursor()
+    
+    # Buscar todas as escolas
+    c.execute("SELECT id FROM escolas")
+    escolas = c.fetchall()
+    
+    # Vincular produto a cada escola
+    for escola in escolas:
+        escola_id = escola[0]
+        c.execute('''INSERT OR REPLACE INTO estoque_escolas (escola_id, produto_id, quantidade)
+                     VALUES (?, ?, ?)''', (escola_id, produto_id, quantidade_inicial))
+    
+    conn.commit()
+    conn.close()
+
 # Funções de Gestão de Pedidos
 def add_pedido(cliente_id, escola_id, itens, desconto=0):
     conn = sqlite3.connect('gestao.db')
@@ -266,7 +289,7 @@ def add_pedido(cliente_id, escola_id, itens, desconto=0):
     
     pedido_id = c.lastrowid
     
-    # Inserir itens do pedido
+    # Inserir itens do pedido e atualizar estoque
     for item in itens:
         lucro_unitario = item['preco'] - item['custo']
         margem_unitario = (lucro_unitario / item['preco'] * 100) if item['preco'] > 0 else 0
@@ -274,6 +297,17 @@ def add_pedido(cliente_id, escola_id, itens, desconto=0):
         c.execute('''INSERT INTO itens_pedido (pedido_id, produto_id, quantidade, preco_unitario, custo_unitario, lucro_unitario, margem_lucro)
                      VALUES (?, ?, ?, ?, ?, ?, ?)''', 
                   (pedido_id, item['produto_id'], item['quantidade'], item['preco'], item['custo'], lucro_unitario, margem_unitario))
+        
+        # Atualizar estoque - reduzir quantidade
+        c.execute('''SELECT quantidade FROM estoque_escolas 
+                     WHERE escola_id = ? AND produto_id = ?''', (escola_id, item['produto_id']))
+        estoque_atual = c.fetchone()
+        
+        if estoque_atual:
+            nova_quantidade = estoque_atual[0] - item['quantidade']
+            c.execute('''UPDATE estoque_escolas SET quantidade = ?
+                         WHERE escola_id = ? AND produto_id = ?''', 
+                      (nova_quantidade, escola_id, item['produto_id']))
     
     conn.commit()
     conn.close()
@@ -290,6 +324,13 @@ def get_pedidos():
     pedidos = c.fetchall()
     conn.close()
     return pedidos
+
+def update_pedido_status(pedido_id, novo_status):
+    conn = sqlite3.connect('gestao.db')
+    c = conn.cursor()
+    c.execute("UPDATE pedidos SET status = ? WHERE id = ?", (novo_status, pedido_id))
+    conn.commit()
+    conn.close()
 
 # Funções de Gestão de Usuários
 def add_usuario(username, password, nivel):
@@ -548,7 +589,7 @@ def show_client_management():
                 st.write(f"**Telefone:** {cliente[2]}")
                 st.write(f"**Email:** {cliente[3]}")
                 st.write(f"**Endereço:** {cliente[5]}")
-                st.write(f"**Cadastrado em:** {format_date_br(datetime.strptime(cliente[6], '%Y-%m-%d %H:%M:%S'))}")
+                st.write(f"**Cadastrado em:** {format_date_br(cliente[6])}")
                 
                 if st.button(f"Excluir", key=f"del_{cliente[0]}"):
                     delete_cliente(cliente[0])
@@ -609,7 +650,7 @@ def show_school_management():
                 st.write(f"**Email:** {escola[3]}")
                 st.write(f"**Endereço:** {escola[4]}")
                 st.write(f"**Responsável:** {escola[5]}")
-                st.write(f"**Cadastrado em:** {format_date_br(datetime.strptime(escola[6], '%Y-%m-%d %H:%M:%S'))}")
+                st.write(f"**Cadastrado em:** {format_date_br(escola[6])}")
     
     with tab3:
         st.subheader("Estoque por Escola")
@@ -627,7 +668,7 @@ def show_school_management():
                 st.write(f"**Estoque da Escola:** {escola_selecionada.split(' - ')[1]}")
                 
                 for produto in produtos:
-                    with st.form(f"estoque_{produto[0]}"):
+                    with st.form(f"estoque_{produto[0]}_{escola_id}"):
                         col1, col2, col3 = st.columns([2, 1, 1])
                         with col1:
                             st.write(f"**{produto[1]}**")
@@ -636,16 +677,27 @@ def show_school_management():
                             # Encontrar quantidade atual no estoque
                             qtd_atual = 0
                             for item in estoque:
-                                if item[0] == produto[0]:
+                                if item[6] == produto[0]:  # produto_id
                                     qtd_atual = item[2]
                                     break
                             quantidade = st.number_input("Quantidade", min_value=0, value=qtd_atual, 
-                                                        key=f"qtd_{produto[0]}")
+                                                        key=f"qtd_{produto[0]}_{escola_id}")
                         with col3:
                             if st.form_submit_button("Atualizar"):
                                 update_estoque_escola(escola_id, produto[0], quantidade)
                                 st.success("Estoque atualizado!")
                                 st.rerun()
+                
+                # Mostrar alertas de estoque baixo
+                st.subheader("Alertas de Estoque")
+                alertas_encontrados = False
+                for item in estoque:
+                    if item[2] <= item[3]:  # quantidade <= estoque_minimo
+                        st.warning(f"⚠️ {item[1]} - Estoque: {item[2]} (Mínimo: {item[3]})")
+                        alertas_encontrados = True
+                
+                if not alertas_encontrados:
+                    st.success("✅ Todos os produtos com estoque suficiente")
         else:
             st.warning("Cadastre escolas e produtos primeiro")
 
@@ -661,16 +713,25 @@ def show_product_management():
             descricao = st.text_area("Descrição")
             col1, col2, col3 = st.columns(3)
             with col1:
-                preco = st.number_input("Preço de Venda (R$)", min_value=0.0, value=0.0)
+                preco = st.number_input("Preço de Venda (R$)", min_value=0.0, value=0.0, step=0.01)
             with col2:
-                custo = st.number_input("Custo (R$)", min_value=0.0, value=0.0)
+                custo = st.number_input("Custo (R$)", min_value=0.0, value=0.0, step=0.01)
             with col3:
                 estoque_minimo = st.number_input("Estoque Mínimo", min_value=0, value=5)
             
+            # Opção para vincular automaticamente às escolas
+            vincular_escolas = st.checkbox("Vincular este produto a todas as escolas automaticamente", value=True)
+            estoque_inicial = st.number_input("Estoque inicial nas escolas", min_value=0, value=0)
+            
             if st.form_submit_button("Cadastrar Produto"):
                 if nome and preco > 0:
-                    add_produto(nome, descricao, preco, custo, estoque_minimo)
+                    produto_id = add_produto(nome, descricao, preco, custo, estoque_minimo)
                     st.success("Produto cadastrado com sucesso!")
+                    
+                    # Vincular automaticamente às escolas
+                    if vincular_escolas:
+                        vincular_produto_todas_escolas(produto_id, estoque_inicial)
+                        st.success(f"Produto vinculado automaticamente a todas as escolas com estoque inicial de {estoque_inicial} unidades")
                     
                     # Calcular margem automática
                     if preco > 0 and custo > 0:
@@ -696,6 +757,16 @@ def show_product_management():
                     lucro_unitario = produto[3] - produto[4]
                     st.write(f"**Margem:** {margem:.1f}%")
                     st.write(f"**Lucro Unitário:** R$ {lucro_unitario:.2f}")
+                
+                # Mostrar estoque por escola
+                st.write("**Estoque por Escola:**")
+                escolas = get_escolas()
+                for escola in escolas:
+                    estoque = get_estoque_escola(escola[0])
+                    for item in estoque:
+                        if item[6] == produto[0]:  # produto_id
+                            st.write(f"- {escola[1]}: {item[2]} unidades")
+                            break
                 
                 if st.button(f"Excluir", key=f"del_prod_{produto[0]}"):
                     delete_produto(produto[0])
@@ -758,17 +829,44 @@ def show_order_management():
             st.subheader("Itens do Pedido")
             
             itens = []
+            if escola_selecionada:
+                escola_id = int(escola_selecionada.split(' - ')[0])
+                estoque_escola = get_estoque_escola(escola_id)
+            
             for i in range(3):  # Permite até 3 itens inicialmente
                 col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
                 with col1:
-                    produto_options = [f"{p[0]} - {p[1]} (R$ {p[3]:.2f})" for p in produtos]
+                    # Mostrar apenas produtos com estoque disponível
+                    produto_options = []
+                    for produto in produtos:
+                        # Verificar estoque na escola selecionada
+                        estoque_disponivel = 0
+                        for item in estoque_escola:
+                            if item[6] == produto[0]:  # produto_id
+                                estoque_disponivel = item[2]
+                                break
+                        
+                        if estoque_disponivel > 0:
+                            produto_options.append(f"{produto[0]} - {produto[1]} (Estoque: {estoque_disponivel})")
+                    
                     if produto_options:
                         produto = st.selectbox(f"Produto {i+1}", [""] + produto_options, key=f"prod_{i}")
                     else:
-                        st.warning("Nenhum produto cadastrado")
+                        st.warning("Nenhum produto com estoque disponível")
                         produto = None
                 with col2:
-                    quantidade = st.number_input(f"Qtd {i+1}", min_value=0, value=0, key=f"qtd_{i}")
+                    if produto:
+                        # Obter quantidade máxima disponível
+                        produto_id = int(produto.split(' - ')[0])
+                        estoque_disponivel = 0
+                        for item in estoque_escola:
+                            if item[6] == produto_id:
+                                estoque_disponivel = item[2]
+                                break
+                        
+                        quantidade = st.number_input(f"Qtd {i+1}", min_value=1, max_value=estoque_disponivel, value=1, key=f"qtd_{i}")
+                    else:
+                        quantidade = st.number_input(f"Qtd {i+1}", min_value=0, value=0, key=f"qtd_{i}")
                 with col3:
                     if produto:
                         produto_id = int(produto.split(' - ')[0])
@@ -835,20 +933,52 @@ def show_order_management():
         st.subheader("Histórico de Pedidos")
         pedidos = get_pedidos()
         
+        # Filtros
+        col1, col2 = st.columns(2)
+        with col1:
+            status_filter = st.selectbox("Filtrar por status", ["Todos", "Pendente", "Confirmado", "Enviado", "Entregue", "Cancelado"])
+        with col2:
+            search_pedido = st.text_input("Buscar por ID ou cliente")
+        
         for pedido in pedidos:
-            with st.expander(f"Pedido #{pedido[0]} - {pedido[6]} - R$ {pedido[4]:.2f}"):
+            # Aplicar filtros
+            if status_filter != "Todos" and pedido[3] != status_filter:
+                continue
+            if search_pedido and (search_pedido not in str(pedido[0]) and search_pedido.lower() not in pedido[6].lower()):
+                continue
+                
+            with st.expander(f"Pedido #{pedido[0]} - {pedido[6]} - R$ {pedido[4]:.2f} - {pedido[3]}"):
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write(f"**Cliente:** {pedido[6]}")
                     st.write(f"**Escola:** {pedido[7]}")
                     st.write(f"**Status:** {pedido[3]}")
-                    st.write(f"**Data:** {format_date_br(datetime.strptime(pedido[9], '%Y-%m-%d %H:%M:%S'))}")
+                    st.write(f"**Data:** {format_date_br(pedido[9])}")
                 with col2:
                     st.write(f"**Total:** R$ {pedido[4]:.2f}")
                     st.write(f"**Desconto:** {pedido[5]}%")
                     st.write(f"**Custo Total:** R$ {pedido[6]:.2f}")
                     st.write(f"**Lucro:** R$ {pedido[7]:.2f}")
                     st.write(f"**Margem:** {pedido[8]:.1f}%")
+                
+                # Botão para alterar status
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if st.button("✅ Confirmado", key=f"confirm_{pedido[0]}"):
+                        update_pedido_status(pedido[0], "Confirmado")
+                        st.rerun()
+                with col2:
+                    if st.button("🚚 Enviado", key=f"enviado_{pedido[0]}"):
+                        update_pedido_status(pedido[0], "Enviado")
+                        st.rerun()
+                with col3:
+                    if st.button("📦 Entregue", key=f"entregue_{pedido[0]}"):
+                        update_pedido_status(pedido[0], "Entregue")
+                        st.rerun()
+                
+                if st.button("❌ Cancelar", key=f"cancel_{pedido[0]}"):
+                    update_pedido_status(pedido[0], "Cancelado")
+                    st.rerun()
 
 def show_reports():
     st.title("📈 Relatórios e Análises")
@@ -907,9 +1037,15 @@ def show_reports():
             with col4:
                 st.metric("Margem Média", f"{margem_media:.1f}%")
             
-            # Produtos mais lucrativos
-            st.subheader("Produtos Mais Lucrativos")
-            # Aqui você pode adicionar análise por produto
+            # Vendas por status
+            st.subheader("Vendas por Status")
+            status_vendas = {}
+            for pedido in pedidos:
+                status = pedido[3]
+                status_vendas[status] = status_vendas.get(status, 0) + pedido[4]
+            
+            for status, total in status_vendas.items():
+                st.write(f"**{status}:** R$ {total:,.2f}")
         else:
             st.info("Nenhum pedido encontrado para análise")
     
@@ -993,7 +1129,7 @@ def show_ai_system():
             for escola in escolas:
                 estoque = get_estoque_escola(escola[0])
                 for item in estoque:
-                    if item[0] == produto[0] and item[2] > 0:
+                    if item[6] == produto[0] and item[2] > 0:
                         tem_estoque = True
                         break
                 if tem_estoque:
@@ -1073,7 +1209,7 @@ def show_admin_panel():
             with st.expander(f"{usuario[1]} - {usuario[2]}"):
                 st.write(f"ID: {usuario[0]}")
                 st.write(f"Nível: {usuario[2]}")
-                st.write(f"Criado em: {format_date_br(datetime.strptime(usuario[3], '%Y-%m-%d %H:%M:%S'))}")
+                st.write(f"Criado em: {format_date_br(usuario[3])}")
                 
                 if usuario[1] != "admin":  # Não permite excluir o admin principal
                     if st.button(f"Excluir Usuário", key=f"del_user_{usuario[0]}"):
