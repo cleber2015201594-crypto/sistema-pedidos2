@@ -6,10 +6,6 @@ import hashlib
 import csv
 from io import StringIO
 import pytz
-from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, UniqueConstraint
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.exc import IntegrityError
 import urllib.parse
 
 # Configuração da página
@@ -19,6 +15,17 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Tente importar SQLAlchemy com fallback
+try:
+    from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text, ForeignKey, UniqueConstraint
+    from sqlalchemy.ext.declarative import declarative_base
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.exc import IntegrityError
+    SQLALCHEMY_AVAILABLE = True
+except ImportError as e:
+    st.error(f"Erro ao importar SQLAlchemy: {e}")
+    SQLALCHEMY_AVAILABLE = False
 
 # Configuração do banco de dados
 def get_database_url():
@@ -30,88 +37,92 @@ def get_database_url():
     else:
         return 'sqlite:///gestao.db'
 
-# Criar engine do SQLAlchemy
-engine = create_engine(get_database_url())
-Base = declarative_base()
+# Inicialização do banco apenas se SQLAlchemy estiver disponível
+if SQLALCHEMY_AVAILABLE:
+    try:
+        engine = create_engine(get_database_url())
+        Base = declarative_base()
 
-# Definir modelos
-class Usuario(Base):
-    __tablename__ = 'usuarios'
-    id = Column(Integer, primary_key=True)
-    username = Column(String(50), unique=True, nullable=False)
-    password = Column(String(255), nullable=False)
-    nivel = Column(String(20), nullable=False)
-    criado_em = Column(DateTime, default=datetime.now)
+        # Definir modelos
+        class Usuario(Base):
+            __tablename__ = 'usuarios'
+            id = Column(Integer, primary_key=True)
+            username = Column(String(50), unique=True, nullable=False)
+            password = Column(String(255), nullable=False)
+            nivel = Column(String(20), nullable=False)
+            criado_em = Column(DateTime, default=datetime.now)
 
-class Cliente(Base):
-    __tablename__ = 'clientes'
-    id = Column(Integer, primary_key=True)
-    nome = Column(String(100), nullable=False)
-    telefone = Column(String(20))
-    email = Column(String(100))
-    cpf = Column(String(20))
-    endereco = Column(Text)
-    criado_em = Column(DateTime, default=datetime.now)
+        class Cliente(Base):
+            __tablename__ = 'clientes'
+            id = Column(Integer, primary_key=True)
+            nome = Column(String(100), nullable=False)
+            telefone = Column(String(20))
+            email = Column(String(100))
+            cpf = Column(String(20))
+            endereco = Column(Text)
+            criado_em = Column(DateTime, default=datetime.now)
 
-class Escola(Base):
-    __tablename__ = 'escolas'
-    id = Column(Integer, primary_key=True)
-    nome = Column(String(100), nullable=False)
-    telefone = Column(String(20))
-    email = Column(String(100))
-    endereco = Column(Text)
-    responsavel = Column(String(100))
-    criado_em = Column(DateTime, default=datetime.now)
+        class Escola(Base):
+            __tablename__ = 'escolas'
+            id = Column(Integer, primary_key=True)
+            nome = Column(String(100), nullable=False)
+            telefone = Column(String(20))
+            email = Column(String(100))
+            endereco = Column(Text)
+            responsavel = Column(String(100))
+            criado_em = Column(DateTime, default=datetime.now)
 
-class Produto(Base):
-    __tablename__ = 'produtos'
-    id = Column(Integer, primary_key=True)
-    nome = Column(String(100), nullable=False)
-    descricao = Column(Text)
-    preco = Column(Float, nullable=False)
-    custo = Column(Float)
-    estoque_minimo = Column(Integer, default=5)
-    tamanho = Column(String(10))
-    criado_em = Column(DateTime, default=datetime.now)
-    __table_args__ = (UniqueConstraint('nome', 'tamanho', name='_nome_tamanho_uc'),)
+        class Produto(Base):
+            __tablename__ = 'produtos'
+            id = Column(Integer, primary_key=True)
+            nome = Column(String(100), nullable=False)
+            descricao = Column(Text)
+            preco = Column(Float, nullable=False)
+            custo = Column(Float)
+            estoque_minimo = Column(Integer, default=5)
+            tamanho = Column(String(10))
+            criado_em = Column(DateTime, default=datetime.now)
+            __table_args__ = (UniqueConstraint('nome', 'tamanho', name='_nome_tamanho_uc'),)
 
-class EstoqueEscola(Base):
-    __tablename__ = 'estoque_escolas'
-    id = Column(Integer, primary_key=True)
-    escola_id = Column(Integer, ForeignKey('escolas.id'))
-    produto_id = Column(Integer, ForeignKey('produtos.id'))
-    quantidade = Column(Integer, default=0)
-    __table_args__ = (UniqueConstraint('escola_id', 'produto_id', name='_escola_produto_uc'),)
+        class EstoqueEscola(Base):
+            __tablename__ = 'estoque_escolas'
+            id = Column(Integer, primary_key=True)
+            escola_id = Column(Integer, ForeignKey('escolas.id'))
+            produto_id = Column(Integer, ForeignKey('produtos.id'))
+            quantidade = Column(Integer, default=0)
+            __table_args__ = (UniqueConstraint('escola_id', 'produto_id', name='_escola_produto_uc'),)
 
-class Pedido(Base):
-    __tablename__ = 'pedidos'
-    id = Column(Integer, primary_key=True)
-    cliente_id = Column(Integer, ForeignKey('clientes.id'))
-    escola_id = Column(Integer, ForeignKey('escolas.id'))
-    status = Column(String(20), default='Pendente')
-    total = Column(Float)
-    desconto = Column(Float, default=0)
-    custo_total = Column(Float)
-    lucro_total = Column(Float)
-    margem_lucro = Column(Float)
-    criado_em = Column(DateTime, default=datetime.now)
+        class Pedido(Base):
+            __tablename__ = 'pedidos'
+            id = Column(Integer, primary_key=True)
+            cliente_id = Column(Integer, ForeignKey('clientes.id'))
+            escola_id = Column(Integer, ForeignKey('escolas.id'))
+            status = Column(String(20), default='Pendente')
+            total = Column(Float)
+            desconto = Column(Float, default=0)
+            custo_total = Column(Float)
+            lucro_total = Column(Float)
+            margem_lucro = Column(Float)
+            criado_em = Column(DateTime, default=datetime.now)
 
-class ItemPedido(Base):
-    __tablename__ = 'itens_pedido'
-    id = Column(Integer, primary_key=True)
-    pedido_id = Column(Integer, ForeignKey('pedidos.id'))
-    produto_id = Column(Integer, ForeignKey('produtos.id'))
-    quantidade = Column(Integer)
-    preco_unitario = Column(Float)
-    custo_unitario = Column(Float)
-    lucro_unitario = Column(Float)
-    margem_lucro = Column(Float)
+        class ItemPedido(Base):
+            __tablename__ = 'itens_pedido'
+            id = Column(Integer, primary_key=True)
+            pedido_id = Column(Integer, ForeignKey('pedidos.id'))
+            produto_id = Column(Integer, ForeignKey('produtos.id'))
+            quantidade = Column(Integer)
+            preco_unitario = Column(Float)
+            custo_unitario = Column(Float)
+            lucro_unitario = Column(Float)
+            margem_lucro = Column(Float)
 
-# Criar tabelas
-Base.metadata.create_all(engine)
-
-# Criar session
-Session = sessionmaker(bind=engine)
+        # Criar tabelas
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        
+    except Exception as e:
+        st.error(f"Erro ao inicializar SQLAlchemy: {e}")
+        SQLALCHEMY_AVAILABLE = False
 
 # Função para obter data/hora do Brasil
 def get_brasil_datetime():
@@ -128,6 +139,10 @@ def format_date_br(dt):
 
 # Sistema de Autenticação
 def init_db():
+    if not SQLALCHEMY_AVAILABLE:
+        st.error("SQLAlchemy não está disponível. Verifique as dependências.")
+        return
+        
     session = Session()
     try:
         # Verificar se usuário admin existe
@@ -147,6 +162,10 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def verify_login(username, password):
+    if not SQLALCHEMY_AVAILABLE:
+        st.error("Sistema de banco de dados não disponível")
+        return None
+        
     session = Session()
     try:
         user = session.query(Usuario).filter_by(username=username).first()
@@ -161,6 +180,10 @@ def verify_login(username, password):
 
 # Funções de Gestão de Clientes
 def add_cliente(nome, telefone, email, cpf, endereco):
+    if not SQLALCHEMY_AVAILABLE:
+        st.error("Sistema de banco de dados não disponível")
+        return False
+        
     session = Session()
     try:
         cliente = Cliente(
@@ -181,6 +204,9 @@ def add_cliente(nome, telefone, email, cpf, endereco):
         session.close()
 
 def get_clientes():
+    if not SQLALCHEMY_AVAILABLE:
+        return []
+        
     session = Session()
     try:
         clientes = session.query(Cliente).order_by(Cliente.nome).all()
@@ -193,6 +219,10 @@ def get_clientes():
 
 # Funções de Gestão de Escolas
 def add_escola(nome, telefone, email, endereco, responsavel):
+    if not SQLALCHEMY_AVAILABLE:
+        st.error("Sistema de banco de dados não disponível")
+        return False
+        
     session = Session()
     try:
         escola = Escola(
@@ -213,6 +243,9 @@ def add_escola(nome, telefone, email, endereco, responsavel):
         session.close()
 
 def get_escolas():
+    if not SQLALCHEMY_AVAILABLE:
+        return []
+        
     session = Session()
     try:
         escolas = session.query(Escola).order_by(Escola.nome).all()
@@ -225,6 +258,10 @@ def get_escolas():
 
 # Funções de Gestão de Produtos
 def add_produto(nome, descricao, preco, custo, estoque_minimo, tamanho):
+    if not SQLALCHEMY_AVAILABLE:
+        st.error("Sistema de banco de dados não disponível")
+        return False, "Sistema indisponível"
+        
     session = Session()
     try:
         # Verificar se produto já existe
@@ -254,6 +291,9 @@ def add_produto(nome, descricao, preco, custo, estoque_minimo, tamanho):
         session.close()
 
 def get_produtos():
+    if not SQLALCHEMY_AVAILABLE:
+        return []
+        
     session = Session()
     try:
         produtos = session.query(Produto).order_by(Produto.nome, Produto.tamanho).all()
@@ -266,6 +306,10 @@ def get_produtos():
 
 # Funções de Gestão de Estoque
 def vincular_produto_todas_escolas(produto_id, quantidade_inicial=0):
+    if not SQLALCHEMY_AVAILABLE:
+        st.error("Sistema de banco de dados não disponível")
+        return False
+        
     session = Session()
     try:
         escolas = get_escolas()
@@ -293,22 +337,28 @@ def vincular_produto_todas_escolas(produto_id, quantidade_inicial=0):
         session.close()
 
 def get_estoque_escola(escola_id):
+    if not SQLALCHEMY_AVAILABLE:
+        return []
+        
     session = Session()
     try:
-        estoque = session.query(EstoqueEscola, Produto).join(
+        estoque_items = session.query(EstoqueEscola, Produto).join(
             Produto, EstoqueEscola.produto_id == Produto.id
         ).filter(EstoqueEscola.escola_id == escola_id).all()
         
-        return [(
-            e.EstoqueEscola.id, 
-            e.Produto.nome, 
-            e.Produto.tamanho, 
-            e.EstoqueEscola.quantidade, 
-            e.Produto.estoque_minimo,
-            e.Produto.preco,
-            e.Produto.custo,
-            e.Produto.id
-        ) for e in estoque]
+        resultado = []
+        for estoque_item in estoque_items:
+            resultado.append((
+                estoque_item.EstoqueEscola.id, 
+                estoque_item.Produto.nome, 
+                estoque_item.Produto.tamanho, 
+                estoque_item.EstoqueEscola.quantidade, 
+                estoque_item.Produto.estoque_minimo,
+                estoque_item.Produto.preco,
+                estoque_item.Produto.custo,
+                estoque_item.Produto.id
+            ))
+        return resultado
     except Exception as e:
         st.error(f"Erro ao buscar estoque: {e}")
         return []
@@ -316,6 +366,10 @@ def get_estoque_escola(escola_id):
         session.close()
 
 def update_estoque_escola(escola_id, produto_id, quantidade):
+    if not SQLALCHEMY_AVAILABLE:
+        st.error("Sistema de banco de dados não disponível")
+        return False
+        
     session = Session()
     try:
         estoque = session.query(EstoqueEscola).filter_by(
@@ -343,6 +397,10 @@ def update_estoque_escola(escola_id, produto_id, quantidade):
 
 # Funções de Gestão de Pedidos
 def add_pedido(cliente_id, escola_id, itens, desconto=0):
+    if not SQLALCHEMY_AVAILABLE:
+        st.error("Sistema de banco de dados não disponível")
+        return None
+        
     session = Session()
     try:
         # Calcular totais
@@ -399,19 +457,34 @@ def add_pedido(cliente_id, escola_id, itens, desconto=0):
         session.close()
 
 def get_pedidos():
+    if not SQLALCHEMY_AVAILABLE:
+        return []
+        
     session = Session()
     try:
-        pedidos = session.query(Pedido, Cliente, Escola).join(
+        pedidos_data = session.query(Pedido, Cliente, Escola).join(
             Cliente, Pedido.cliente_id == Cliente.id
         ).join(
             Escola, Pedido.escola_id == Escola.id
         ).order_by(Pedido.criado_em.desc()).all()
         
-        return [(
-            p.Pedido.id, p.Pedido.cliente_id, p.Pedido.escola_id, p.Pedido.status,
-            p.Pedido.total, p.Pedido.desconto, p.Pedido.custo_total, p.Pedido.lucro_total,
-            p.Pedido.margem_lucro, p.Pedido.criado_em, p.Cliente.nome, p.Escola.nome
-        ) for p in pedidos]
+        resultado = []
+        for pedido_item in pedidos_data:
+            resultado.append((
+                pedido_item.Pedido.id, 
+                pedido_item.Pedido.cliente_id, 
+                pedido_item.Pedido.escola_id, 
+                pedido_item.Pedido.status,
+                pedido_item.Pedido.total, 
+                pedido_item.Pedido.desconto, 
+                pedido_item.Pedido.custo_total, 
+                pedido_item.Pedido.lucro_total,
+                pedido_item.Pedido.margem_lucro, 
+                pedido_item.Pedido.criado_em, 
+                pedido_item.Cliente.nome, 
+                pedido_item.Escola.nome
+            ))
+        return resultado
     except Exception as e:
         st.error(f"Erro ao buscar pedidos: {e}")
         return []
@@ -419,6 +492,10 @@ def get_pedidos():
         session.close()
 
 def update_pedido_status(pedido_id, novo_status):
+    if not SQLALCHEMY_AVAILABLE:
+        st.error("Sistema de banco de dados não disponível")
+        return False
+        
     session = Session()
     try:
         pedido = session.query(Pedido).filter_by(id=pedido_id).first()
@@ -436,6 +513,10 @@ def update_pedido_status(pedido_id, novo_status):
 
 # Funções de Gestão de Usuários
 def add_usuario(username, password, nivel):
+    if not SQLALCHEMY_AVAILABLE:
+        st.error("Sistema de banco de dados não disponível")
+        return False
+        
     session = Session()
     try:
         senha_hash = hash_password(password)
@@ -455,6 +536,9 @@ def add_usuario(username, password, nivel):
         session.close()
 
 def get_usuarios():
+    if not SQLALCHEMY_AVAILABLE:
+        return []
+        
     session = Session()
     try:
         usuarios = session.query(Usuario).order_by(Usuario.username).all()
@@ -472,26 +556,54 @@ def previsao_vendas():
     return meses, vendas
 
 def alertas_estoque():
+    if not SQLALCHEMY_AVAILABLE:
+        return []
+        
     session = Session()
     try:
-        alertas = session.query(EstoqueEscola, Produto, Escola).join(
+        alertas_data = session.query(EstoqueEscola, Produto, Escola).join(
             Produto, EstoqueEscola.produto_id == Produto.id
         ).join(
             Escola, EstoqueEscola.escola_id == Escola.id
         ).filter(EstoqueEscola.quantidade <= Produto.estoque_minimo).all()
         
-        return [(
-            a.EstoqueEscola.escola_id, a.Escola.nome, a.Produto.nome, a.Produto.tamanho,
-            a.EstoqueEscola.quantidade, a.Produto.estoque_minimo
-        ) for a in alertas]
+        resultado = []
+        for alerta_item in alertas_data:
+            resultado.append((
+                alerta_item.EstoqueEscola.escola_id, 
+                alerta_item.Escola.nome, 
+                alerta_item.Produto.nome, 
+                alerta_item.Produto.tamanho,
+                alerta_item.EstoqueEscola.quantidade, 
+                alerta_item.Produto.estoque_minimo
+            ))
+        return resultado
     except Exception as e:
         st.error(f"Erro ao buscar alertas: {e}")
         return []
     finally:
         session.close()
 
-# Interface Principal (mantida igual)
+# Interface Principal
 def main():
+    if not SQLALCHEMY_AVAILABLE:
+        st.error("""
+        ⚠️ **Sistema de banco de dados não disponível**
+        
+        O sistema não pode inicializar devido a problemas de compatibilidade.
+        Por favor, verifique se todas as dependências estão instaladas corretamente.
+        
+        **Dependências necessárias:**
+        - streamlit==1.28.0
+        - SQLAlchemy==1.4.46
+        - psycopg2-binary==2.9.9
+        - pytz==2023.3
+        - python-dotenv==1.0.0
+        
+        **Python: 3.11.9 (recomendado)**
+        """)
+        return
+        
     init_db()
     
     if 'user' not in st.session_state:
